@@ -1,6 +1,5 @@
-// models/User.js
+import bcrypt from 'bcryptjs';
 import mongoose from "mongoose";
-import bcrypt from "bcryptjs";
 
 const userSchema = new mongoose.Schema({
   firstName: {
@@ -18,16 +17,15 @@ const userSchema = new mongoose.Schema({
   },
   password: {
     type: String,
-    required: false,  // Making password optional for wallet login
+    required: false,  
   },
   walletAddress: {
     type: String,
-    required: true,  // Now it's required for signup with wallet address
-    unique: true,    // Ensures the wallet address is unique
+    required: true,  
+    unique: true,    
   },
 });
 
-// Hash password before saving the user
 userSchema.pre("save", async function (next) {
   if (!this.isModified("password")) return next();
 
@@ -35,7 +33,6 @@ userSchema.pre("save", async function (next) {
   this.password = await bcrypt.hash(this.password, salt);
 });
 
-// Compare entered password with stored hashed password
 userSchema.methods.matchPassword = async function (enteredPassword) {
   return enteredPassword && await bcrypt.compare(enteredPassword, this.password);
 };

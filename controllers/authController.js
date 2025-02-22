@@ -1,11 +1,14 @@
 import { checkSignature, generateNonce } from '@meshsdk/core';
 import User from "../models/User.js";
 import jwt from "jsonwebtoken";
-import bcrypt from "bcryptjs";
 import { OAuth2Client } from "google-auth-library";
 import axios from "axios";
+import { TwitterApi } from 'twitter-api-v2';
+import passport from 'passport';
+import GitHubStrategy from 'passport-github2'; 
 
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+const twitterClient = new TwitterApi(process.env.TWITTER_BEARER_TOKEN);
 
 async function backendGetNonce(userAddress) {
   const nonce = generateNonce('I agree to the terms and conditions of Cardano Hub Indonesia: ');
@@ -18,7 +21,7 @@ async function backendVerifySignature(userAddress, signature, nonce) {
 }
 
 export const signup = async (req, res) => {
-  const { firstName, lastName, email, password, walletAddress, googleToken, signature } = req.body;
+  const { firstName, lastName, email, walletAddress, googleToken, signature, twitterToken, githubToken } = req.body;
 
   if (googleToken) {
     try {
@@ -26,7 +29,6 @@ export const signup = async (req, res) => {
         idToken: googleToken,
         audience: process.env.GOOGLE_CLIENT_ID,
       });
-
       const payload = ticket.getPayload();
       email = payload.email; 
       const existingUser = await User.findOne({ email });
@@ -46,6 +48,54 @@ export const signup = async (req, res) => {
       });
     } catch (error) {
       return res.status(500).json({ message: "Error during Google authentication", error: error.message });
+    }
+  } else if (twitterToken) {
+    try {
+      const user = await twitterClient.v2.verifyCredentials(twitterToken);
+      const existingUser = await User.findOne({ email: user.email });
+      if (existingUser) {
+        return res.status(400).json({ message: "User with this Twitter account already exists" });
+      }
+
+      const newUser = new User({ firstName, lastName, email: user.email });
+      await newUser.save();
+
+      const token = jwt.sign({ userId: newUser._id }, process.env.JWT_SECRET, { expiresIn: "30d" });
+
+      res.status(201).json({
+        message: "User created successfully via Twitter",
+        token,
+        user: newUser,
+      });
+    } catch (error) {
+      return res.status(500).json({ message: "Error during Twitter authentication", error: error.message });
+    }
+  } else if (githubToken) {
+    try {
+      const { data } = await axios.get('https://api.github.com/user', {
+        headers: {
+          Authorization: `token ${githubToken}`,
+        },
+      });
+
+      const email = data.email;
+      const existingUser = await User.findOne({ email });
+      if (existingUser) {
+        return res.status(400).json({ message: "User with this GitHub account already exists" });
+      }
+
+      const newUser = new User({ firstName, lastName, email });
+      await newUser.save();
+
+      const token = jwt.sign({ userId: newUser._id }, process.env.JWT_SECRET, { expiresIn: "30d" });
+
+      res.status(201).json({
+        message: "User created successfully via GitHub",
+        token,
+        user: newUser,
+      });
+    } catch (error) {
+      return res.status(500).json({ message: "Error during GitHub authentication", error: error.message });
     }
   } else if (walletAddress && signature) {
     try {
@@ -72,35 +122,14 @@ export const signup = async (req, res) => {
     } catch (error) {
       res.status(500).json({ message: "Server error", error: error.message });
     }
-  } else if (password) {
-    if (!firstName || !lastName || !email || !password) {
-      return res.status(400).json({ message: "Please fill in all required fields" });
-    }
-    try {
-      const existingUser = await User.findOne({ email });
-      if (existingUser) {
-        return res.status(400).json({ message: "User with this email already exists" });
-      }
-      const salt = await bcrypt.genSalt(10);
-      const hashedPassword = await bcrypt.hash(password, salt);
-      const newUser = new User({ firstName, lastName, email, password: hashedPassword });
-      await newUser.save();
-      const token = jwt.sign({ userId: newUser._id }, process.env.JWT_SECRET, { expiresIn: "30d" });
-      res.status(201).json({
-        message: "User created successfully via username/password",
-        token,
-        user: newUser,
-      });
-    } catch (error) {
-      res.status(500).json({ message: "Server error", error: error.message });
-    }
   } else {
-    res.status(400).json({ message: "Please provide wallet address, username/password, or Google token" });
+    res.status(400).json({ message: "Please provide wallet address, Google token, Twitter token, or GitHub token" });
   }
 };
 
 export const login = async (req, res) => {
-  const { walletAddress, password, googleToken, signature } = req.body;
+  const { walletAddress, googleToken, signature, twitterToken, githubToken } = req.body;
+
   if (googleToken) {
     try {
       const ticket = await googleClient.verifyIdToken({
@@ -126,6 +155,48 @@ export const login = async (req, res) => {
     } catch (error) {
       return res.status(500).json({ message: "Error during Google authentication", error: error.message });
     }
+  } else if (twitterToken) {
+    try {
+      const user = await twitterClient.v2.verifyCredentials(twitterToken);
+
+      const existingUser = await User.findOne({ email: user.email });
+      if (!existingUser) {
+        return res.status(400).json({ message: "User not found" });
+      }
+
+      const token = jwt.sign({ userId: existingUser._id }, process.env.JWT_SECRET, { expiresIn: "30d" });
+
+      res.status(200).json({
+        message: "Login successful via Twitter",
+        token,
+        user: existingUser,
+      });
+    } catch (error) {
+      return res.status(500).json({ message: "Error during Twitter authentication", error: error.message });
+    }
+  } else if (githubToken) {
+    try {
+      const { data } = await axios.get('https://api.github.com/user', {
+        headers: {
+          Authorization: `token ${githubToken}`,
+        },
+      });
+
+      const user = await User.findOne({ email: data.email });
+      if (!user) {
+        return res.status(400).json({ message: "User not found" });
+      }
+
+      const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, { expiresIn: "30d" });
+
+      res.status(200).json({
+        message: "Login successful via GitHub",
+        token,
+        user: user,
+      });
+    } catch (error) {
+      return res.status(500).json({ message: "Error during GitHub authentication", error: error.message });
+    }
   } else if (walletAddress && signature) {
     try {
       const nonce = await backendGetNonce(walletAddress);
@@ -148,32 +219,9 @@ export const login = async (req, res) => {
         user: user,
       });
     } catch (error) {
-      res.status(500).json({ message: "Server error", error: error.message });
-    }
-  } else if (password) {
-    const { email } = req.body;
-
-    if (!email || !password) {
-      return res.status(400).json({ message: "Email and password are required" });
-    }
-
-    try {
-      const user = await User.findOne({ email });
-      if (!user || !(await bcrypt.compare(password, user.password))) {
-        return res.status(400).json({ message: "Incorrect email or password" });
-      }
-
-      const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, { expiresIn: "30d" });
-
-      res.status(200).json({
-        message: "Login successful via username/password",
-        token,
-        user: user,
-      });
-    } catch (error) {
-      res.status(500).json({ message: "Server error", error: error.message });
+      return res.status(500).json({ message: "Server error", error: error.message });
     }
   } else {
-    res.status(400).json({ message: "Please provide wallet address, email/password, or Google token" });
+    res.status(400).json({ message: "Please provide wallet address, Google token, Twitter token, or GitHub token" });
   }
 };

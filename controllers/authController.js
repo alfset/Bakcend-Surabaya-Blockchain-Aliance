@@ -1,3 +1,4 @@
+import { checkSignature, generateNonce } from '@meshsdk/core';
 import User from "../models/User.js";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
@@ -6,8 +7,18 @@ import axios from "axios";
 
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
+async function backendGetNonce(userAddress) {
+  const nonce = generateNonce('I agree to the terms and conditions of Mesh: ');
+  return nonce;
+}
+
+async function backendVerifySignature(userAddress, signature, nonce) {
+  const result = checkSignature(nonce, signature, userAddress);
+  return result;
+}
+
 export const signup = async (req, res) => {
-  const { firstName, lastName, email, password, walletAddress, googleToken } = req.body;
+  const { firstName, lastName, email, password, walletAddress, googleToken, signature } = req.body;
 
   if (googleToken) {
     try {
@@ -15,15 +26,15 @@ export const signup = async (req, res) => {
         idToken: googleToken,
         audience: process.env.GOOGLE_CLIENT_ID,
       });
-      const payload = ticket.getPayload();
-      email = payload.email;  
 
+      const payload = ticket.getPayload();
+      email = payload.email; 
       const existingUser = await User.findOne({ email });
       if (existingUser) {
         return res.status(400).json({ message: "User with this email already exists" });
       }
 
-      const newUser = new User({ firstName, lastName, email, walletAddress });
+      const newUser = new User({ firstName, lastName, email });
       await newUser.save();
 
       const token = jwt.sign({ userId: newUser._id }, process.env.JWT_SECRET, { expiresIn: "30d" });
@@ -36,20 +47,25 @@ export const signup = async (req, res) => {
     } catch (error) {
       return res.status(500).json({ message: "Error during Google authentication", error: error.message });
     }
-  } else if (walletAddress) {
+  } else if (walletAddress && signature) {
     try {
+      const nonce = await backendGetNonce(walletAddress);
+      const isValid = await backendVerifySignature(walletAddress, signature, nonce);
+
+      if (!isValid) {
+        return res.status(400).json({ message: "Invalid signature" });
+      }
       const existingUser = await User.findOne({ walletAddress });
       if (existingUser) {
         return res.status(400).json({ message: "User with this wallet address already exists" });
       }
-
       const newUser = new User({ firstName, lastName, email, walletAddress });
       await newUser.save();
 
       const token = jwt.sign({ userId: newUser._id }, process.env.JWT_SECRET, { expiresIn: "30d" });
 
       res.status(201).json({
-        message: "User created successfully via Cardano Wallet",
+        message: "User created successfully via wallet",
         token,
         user: newUser,
       });
@@ -60,21 +76,16 @@ export const signup = async (req, res) => {
     if (!firstName || !lastName || !email || !password) {
       return res.status(400).json({ message: "Please fill in all required fields" });
     }
-
     try {
       const existingUser = await User.findOne({ email });
       if (existingUser) {
         return res.status(400).json({ message: "User with this email already exists" });
       }
-
       const salt = await bcrypt.genSalt(10);
       const hashedPassword = await bcrypt.hash(password, salt);
-
       const newUser = new User({ firstName, lastName, email, password: hashedPassword });
       await newUser.save();
-
       const token = jwt.sign({ userId: newUser._id }, process.env.JWT_SECRET, { expiresIn: "30d" });
-
       res.status(201).json({
         message: "User created successfully via username/password",
         token,
@@ -89,13 +100,14 @@ export const signup = async (req, res) => {
 };
 
 export const login = async (req, res) => {
-  const { walletAddress, password, googleToken } = req.body;
+  const { walletAddress, password, googleToken, signature } = req.body;
   if (googleToken) {
     try {
       const ticket = await googleClient.verifyIdToken({
         idToken: googleToken,
         audience: process.env.GOOGLE_CLIENT_ID,
       });
+
       const payload = ticket.getPayload();
       const email = payload.email;
 
@@ -114,8 +126,15 @@ export const login = async (req, res) => {
     } catch (error) {
       return res.status(500).json({ message: "Error during Google authentication", error: error.message });
     }
-  } else if (walletAddress) {
+  } else if (walletAddress && signature) {
     try {
+      const nonce = await backendGetNonce(walletAddress);
+      const isValid = await backendVerifySignature(walletAddress, signature, nonce);
+
+      if (!isValid) {
+        return res.status(400).json({ message: "Invalid signature" });
+      }
+
       const user = await User.findOne({ walletAddress });
       if (!user) {
         return res.status(400).json({ message: "User not found" });
@@ -124,7 +143,7 @@ export const login = async (req, res) => {
       const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, { expiresIn: "30d" });
 
       res.status(200).json({
-        message: "Login successful via Cardano Wallet",
+        message: "Login successful via wallet",
         token,
         user: user,
       });
@@ -156,23 +175,5 @@ export const login = async (req, res) => {
     }
   } else {
     res.status(400).json({ message: "Please provide wallet address, email/password, or Google token" });
-  }
-};
-
-export const deleteAccount = async (req, res) => {
-  const { userId } = req.user; 
-  
-  try {
-    const user = await User.findByIdAndDelete(userId);
-    
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
-    }
-    
-    res.status(200).json({
-      message: "Account deleted successfully",
-    });
-  } catch (error) {
-    res.status(500).json({ message: "Server error", error: error.message });
   }
 };

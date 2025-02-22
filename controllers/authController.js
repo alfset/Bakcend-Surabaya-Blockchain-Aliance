@@ -8,7 +8,7 @@ import axios from "axios";
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 async function backendGetNonce(userAddress) {
-  const nonce = generateNonce('I agree to the terms and conditions of Mesh: ');
+  const nonce = generateNonce('I agree to the terms and conditions of Cardano Hub Indonesia: ');
   return nonce;
 }
 

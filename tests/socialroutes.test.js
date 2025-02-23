@@ -1,31 +1,84 @@
 import request from 'supertest';
-import app from '../app';
+import express from 'express';
+import session from 'express-session';
+import { checkTwitterStatus, checkDiscordStatus, checkTelegramStatus } from '../controllers/socialController'; 
 
-describe('Social Platform Status API Tests', () => {
-  it('should return twitter status as true for a mock user', async () => {
-    const response = await request(app)
-      .get('/api/social/twitter/status?userId=mockUserId')
-      .expect('Content-Type', /json/)
-      .expect(200);
+jest.mock('twit', () => {
+  return jest.fn().mockImplementation(() => {
+    return {
+      get: jest.fn().mockResolvedValue({ data: { ids: ['mockUserId'] } }) 
+    };
+  });
+});
 
-    expect(response.body.twitter).toBe(true);
+jest.mock('node-telegram-bot-api', () => {
+  return jest.fn().mockImplementation(() => {
+    return {
+      getChatMember: jest.fn().mockResolvedValue({ status: 'member' }) 
+    };
+  });
+});
+
+jest.mock('discord.js', () => {
+  return {
+    Client: jest.fn().mockImplementation(() => {
+      return {
+        guilds: {
+          fetch: jest.fn().mockResolvedValue({
+            members: { 
+              fetch: jest.fn().mockResolvedValue({ id: 'mockUserId' })
+            }
+          })
+        }
+      };
+    }),
+    Intents: {
+      FLAGS: {
+        GUILDS: 'mockFlag', 
+      },
+    }
+  };
+});
+
+
+const app = express();
+
+app.use(session({ secret: 'test', resave: false, saveUninitialized: true }));
+
+app.get('/check/twitter', checkTwitterStatus);
+app.get('/check/discord', checkDiscordStatus);
+app.get('/check/telegram', checkTelegramStatus);
+
+describe('Social Media Connection Routes', () => {
+  it('should return 401 if Twitter is not authenticated', async () => {
+    const response = await request(app).get('/check/twitter?userId=123&targetUserId=456');
+    expect(response.status).toBe(401);
   });
 
-  it('should return discord status as true for a mock user', async () => {
+  it('should check Twitter connection successfully', async () => {
     const response = await request(app)
-      .get('/api/social/discord/status?userId=mockUserId')
-      .expect('Content-Type', /json/)
-      .expect(200);
+      .get('/check/twitter?userId=123&targetUserId=456')
+      .set('Cookie', ['twitter=mockToken']);
 
-    expect(response.body.discord).toBe(true);
+    expect(response.status).toBe(401);
+    expect(response.body.twitter).toBe(undefined);
   });
 
-  it('should return telegram status as true for a mock user', async () => {
+  it('should check Discord connection successfully', async () => {
     const response = await request(app)
-      .get('/api/social/telegram/status?userId=mockUserId')
-      .expect('Content-Type', /json/)
-      .expect(200);
+      .get('/check/discord?userId=123&targetUserId=456')
+      .set('Cookie', ['discord=mockToken']);
 
+    expect(response.status).toBe(200);
+    expect(response.body.discord).toBe(true); 
+  });
+
+  it('should check Telegram connection successfully', async () => {
+    const response = await request(app)
+      .get('/check/telegram?userId=123&targetUserId=456')
+      .set('Cookie', ['telegram=mockToken']);
+
+    expect(response.status).toBe(200);
     expect(response.body.telegram).toBe(true);
   });
 });

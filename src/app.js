@@ -11,7 +11,7 @@ dotenv.config();
 const app = express();
 const port = process.env.PORT || 5000;
 app.use(cors({
-  origin: ['https://surabaya-blockchain-alliance-sand.vercel.app','https://surabaya-blockchain-alliance-sand.vercel.app', 'https://x.com'],
+  origin: ['localhost:3000','https://surabaya-blockchain-alliance-sand.vercel.app', 'https://x.com'],
   credentials: true,
 }));
 

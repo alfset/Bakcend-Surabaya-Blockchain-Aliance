@@ -5,8 +5,7 @@
   "type": "module",
   "scripts": {
     "test": "jest --no-cache",
-    "start": "node app.js",
-    "
+    "start": "node server.js"
   },
   "author": "",
   "license": "ISC",

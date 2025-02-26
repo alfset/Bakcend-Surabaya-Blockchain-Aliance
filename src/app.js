@@ -11,7 +11,7 @@ dotenv.config();
 const app = express();
 const port = process.env.PORT || 5000;
 app.use(cors({
-  origin: ['http://localhost:3000', 'https://x.com', 'https://surabaya-blockchain-alliance-sand.vercel.app'],
+  origin: ['https://surabaya-blockchain-alliance-sand.vercel.app','https://surabaya-blockchain-alliance-sand.vercel.app', 'https://x.com'],
   credentials: true,
 }));
 
@@ -25,7 +25,7 @@ app.use(session({
   cookie: {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax'
+    sameSite: 'lax',
     maxAge: 60 * 60 * 1000,
   },
 }));
@@ -243,17 +243,29 @@ app.get('/connect/telegram', (req, res) => {
   
   app.post('/connect/telegram/callback', (req, res) => {
     const { hash, id, username, first_name, last_name } = req.body;
+  
+    // Check if all required parameters are present
     if (!hash || !id || !username || !first_name || !last_name) {
       return res.status(400).send('Invalid Telegram callback parameters');
     }
+  
+    // Recreate the data string to generate the hash
     const dataCheckString = `${id}${first_name}${last_name}${username}${process.env.TELEGRAM_BOT_TOKEN}`;
+  
+    // Generate hash using Telegram bot token for verification
     const hashCheck = crypto.createHmac('sha256', process.env.TELEGRAM_BOT_TOKEN)
       .update(dataCheckString)
       .digest('hex');
-      if (hash !== hashCheck) {
+  
+    // Compare the hash from the callback with the generated one
+    if (hash !== hashCheck) {
       return res.status(400).send('Telegram authentication failed');
     }
+  
+    // Save user details in the session
     req.session.telegram = { id, username, first_name, last_name };
+  
+    // Respond with user details if authentication is successful
     res.json({
       success: true,
       telegramUser: { id, username, first_name, last_name }

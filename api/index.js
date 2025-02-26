@@ -11,7 +11,7 @@ dotenv.config();
 const app = express();
 const port = process.env.PORT || 5000;
 app.use(cors({
-  origin: ['http://localhost:3000', 'https://x.com'],
+  origin: ['http://localhost:3000', 'https://surabaya-blockchain-alliance-sand.vercel.app', 'https://x.com'],
   credentials: true,
 }));
 
@@ -47,7 +47,7 @@ app.get('/connect/twitter', async (req, res) => {
     url: 'https://api.twitter.com/oauth/request_token',
     method: 'POST',
     data: {
-      oauth_callback: 'http://localhost:5000/connect/twitter/callback'
+      oauth_callback: 'https://bakcend-surabaya-blockchain-aliance.vercel.app/connect/twitter/callback'
     }
   };
 
@@ -157,7 +157,7 @@ app.get('/connect/twitter/callback', async (req, res) => {
         });
       });
   
-      res.redirect('http://localhost:3000/setup');
+      res.redirect('https://surabaya-blockchain-alliance-sand.vercel.app/setup');
     } catch (error) {
       console.error('Error in Twitter callback:', error);
       res.status(500).json({ error: 'Error completing Twitter authentication' });
@@ -179,7 +179,7 @@ app.get('/connect/twitter/callback', async (req, res) => {
 const discordOAuth = {
   clientId: process.env.DISCORD_CLIENT_ID,
   clientSecret: process.env.DISCORD_CLIENT_SECRET,
-  redirectUri: 'http://localhost:5000/connect/discord/callback',
+  redirectUri: 'https://bakcend-surabaya-blockchain-aliance.vercel.app/connect/discord/callback',
 };
 
 app.get('/connect/discord', (req, res) => {
@@ -220,7 +220,7 @@ app.get('/connect/discord/callback', async (req, res) => {
       accessToken: access_token
     };
 
-    res.redirect('http://localhost:3000/setup');
+    res.redirect('https://surabaya-blockchain-alliance-sand.vercel.app/setup');
   } catch (error) {
     console.error('Error connecting to Discord:', error.response ? error.response.data : error.message);
     res.status(500).send('Error connecting to Discord');

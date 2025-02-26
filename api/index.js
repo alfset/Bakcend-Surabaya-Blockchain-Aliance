@@ -11,7 +11,7 @@ dotenv.config();
 const app = express();
 const port = process.env.PORT || 5000;
 app.use(cors({
-  origin: ['http://localhost:3000', 'https://surabaya-blockchain-alliance-sand.vercel.app', 'https://x.com'],
+  origin: ['http://localhost:3000', 'https://x.com'],
   credentials: true,
 }));
 
@@ -23,7 +23,7 @@ app.use(session({
   resave: false,
   saveUninitialized: false,
   cookie: {
-    httpOnly: false,
+    httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax', // Changed from 'None' to 'lax' for better localhost compatibility
     maxAge: 60 * 60 * 1000,
@@ -47,7 +47,7 @@ app.get('/connect/twitter', async (req, res) => {
     url: 'https://api.twitter.com/oauth/request_token',
     method: 'POST',
     data: {
-      oauth_callback: 'https://bakcend-surabaya-blockchain-aliance.vercel.app/connect/twitter/callback'
+      oauth_callback: 'http://localhost:5000/connect/twitter/callback'
     }
   };
 
@@ -157,7 +157,7 @@ app.get('/connect/twitter/callback', async (req, res) => {
         });
       });
   
-      res.redirect('https://surabaya-blockchain-alliance-sand.vercel.app/setup');
+      res.redirect('http://localhost:3000/setup');
     } catch (error) {
       console.error('Error in Twitter callback:', error);
       res.status(500).json({ error: 'Error completing Twitter authentication' });
@@ -179,7 +179,7 @@ app.get('/connect/twitter/callback', async (req, res) => {
 const discordOAuth = {
   clientId: process.env.DISCORD_CLIENT_ID,
   clientSecret: process.env.DISCORD_CLIENT_SECRET,
-  redirectUri: 'https://bakcend-surabaya-blockchain-aliance.vercel.app/connect/discord/callback',
+  redirectUri: 'http://localhost:5000/connect/discord/callback',
 };
 
 app.get('/connect/discord', (req, res) => {
@@ -220,7 +220,7 @@ app.get('/connect/discord/callback', async (req, res) => {
       accessToken: access_token
     };
 
-    res.redirect('https://surabaya-blockchain-alliance-sand.vercel.app/setup');
+    res.redirect('http://localhost:3000/setup');
   } catch (error) {
     console.error('Error connecting to Discord:', error.response ? error.response.data : error.message);
     res.status(500).send('Error connecting to Discord');
@@ -300,6 +300,8 @@ app.post('/save-profile', (req, res) => {
       userId: req.session.telegram.id
     } : null
   };
+
+  console.log('Saved profile:', profileData);
   res.json({ success: true, profile: profileData });
 });
 

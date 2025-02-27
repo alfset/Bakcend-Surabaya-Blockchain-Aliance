@@ -13,11 +13,8 @@ const port = process.env.PORT || 5000;
 
 app.use(cors({
   origin: ['https://surabaya-blockchain-alliance-sand.vercel.app', 'https://x.com'],
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Access-Token'], 
-  credentials: true, 
+  credentials: true,
 }));
-
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -25,7 +22,7 @@ app.use(express.urlencoded({ extended: true }));
 // Use iron-session for session management
 app.use(withIronSession({
   password: process.env.SESSION_SECRET || 'your_secret_key',
-  cookieName: 'my-app-session',
+  cookieName: 'cardanohub-session',
   cookieOptions: {
     secure: process.env.NODE_ENV === 'production', // Should be true on production
     httpOnly: true,

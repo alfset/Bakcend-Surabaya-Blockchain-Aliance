@@ -19,6 +19,7 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Use cookies for temporary session storage in serverless environment
 app.use(session({
   secret: process.env.SESSION_SECRET || 'your_secret_key',
   resave: false,
@@ -26,8 +27,8 @@ app.use(session({
   cookie: {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax', // Changed from 'None' to 'lax' for better localhost compatibility
-    maxAge: 60 * 60 * 1000,
+    sameSite: 'lax',
+    maxAge: 60 * 60 * 1000, // Cookie expires in 1 hour
   },
 }));
 
@@ -60,7 +61,7 @@ app.get('/connect/twitter', async (req, res) => {
 
   try {
     const headers = oauth.toHeader(oauth.authorize(requestData));
-    
+
     const response = await axios.post(
       requestData.url,
       new URLSearchParams({ oauth_callback: requestData.data.oauth_callback }),
@@ -75,10 +76,7 @@ app.get('/connect/twitter', async (req, res) => {
       throw new Error('Failed to get OAuth tokens');
     }
 
-    req.session.oauth = {
-      token: oauthToken,
-      tokenSecret: oauthTokenSecret
-    };
+    req.session.oauth = { token: oauthToken, tokenSecret: oauthTokenSecret };
 
     await new Promise((resolve, reject) => {
       req.session.save((err) => {
@@ -122,14 +120,11 @@ app.get('/connect/twitter/callback', async (req, res) => {
     data: { oauth_verifier }
   };
 
-  const token = {
-    key: oauth_token,
-    secret: req.session.oauth.tokenSecret
-  };
+  const token = { key: oauth_token, secret: req.session.oauth.tokenSecret };
 
   try {
     const headers = oauth.toHeader(oauth.authorize(requestData, token));
-    
+
     const response = await axios.post(
       requestData.url,
       new URLSearchParams({ oauth_verifier }),
@@ -146,13 +141,9 @@ app.get('/connect/twitter/callback', async (req, res) => {
       throw new Error('Failed to get access tokens');
     }
 
-    req.session.twitter = {
-      accessToken,
-      accessTokenSecret,
-      username: screenName,
-      userId
-    };
+    req.session.twitter = { accessToken, accessTokenSecret, username: screenName, userId };
 
+    // Clean up temporary oauth session data
     delete req.session.oauth;
 
     await new Promise((resolve, reject) => {
@@ -206,51 +197,12 @@ app.get('/connect/discord/callback', async (req, res) => {
     });
 
     const discordUsername = userResponse.data.username;
-    req.session.discord = {
-      username: discordUsername,
-      id: userResponse.data.id,
-      accessToken: access_token
-    };
+    req.session.discord = { username: discordUsername, id: userResponse.data.id, accessToken: access_token };
 
     res.redirect('https://surabaya-blockchain-alliance-sand.vercel.app/setup');
   } catch (error) {
     console.error('Error connecting to Discord:', error.response ? error.response.data : error.message);
     res.status(500).send('Error connecting to Discord');
-  }
-});
-
-// Telegram Callback Handling
-app.post('/connect/telegram/callback', (req, res) => {
-  const { hash, id, username, first_name, last_name } = req.body;
-
-  if (!hash || !id || !username || !first_name || !last_name) {
-    return res.status(400).send('Invalid Telegram callback parameters');
-  }
-
-  const dataCheckString = `${id}${first_name}${last_name}${username}${process.env.TELEGRAM_BOT_TOKEN}`;
-  
-  const hashCheck = crypto.createHmac('sha256', process.env.TELEGRAM_BOT_TOKEN)
-    .update(dataCheckString)
-    .digest('hex');
-
-  if (hash !== hashCheck) {
-    return res.status(400).send('Telegram authentication failed');
-  }
-
-  req.session.telegram = { id, username, first_name, last_name };
-
-  res.json({
-    success: true,
-    telegramUser: { id, username, first_name, last_name }
-  });
-});
-
-// Get Telegram user info
-app.get('/get/telegram-user', (req, res) => {
-  if (req.session.telegram) {
-    res.json({ telegramUser: req.session.telegram });
-  } else {
-    res.json({ telegramUser: null });
   }
 });
 
@@ -268,10 +220,6 @@ app.post('/save-profile', (req, res) => {
       username: discordUsername || req.session.discord.username,
       userId: req.session.discord.id
     } : null,
-    telegram: req.session.telegram ? {
-      username: req.session.telegram.username,
-      userId: req.session.telegram.id
-    } : null
   };
 
   console.log('Saved profile:', profileData);

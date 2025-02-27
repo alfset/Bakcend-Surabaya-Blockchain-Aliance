@@ -42,14 +42,13 @@ const oauth = new OAuth({
 });
 
 // Twitter OAuth Flow - Step 1: Get Request Token
-// Twitter OAuth Flow - Step 1: Get Request Token
 app.get('/connect/twitter', async (req, res) => {
   const requestData = {
     url: 'https://api.twitter.com/oauth/request_token',
     method: 'POST',
     data: {
-      oauth_callback: 'https://bakcend-surabaya-blockchain-aliance.vercel.app/connect/twitter/callback'
-    }
+      oauth_callback: 'https://bakcend-surabaya-blockchain-aliance.vercel.app/connect/twitter/callback',
+    },
   };
 
   try {
@@ -71,7 +70,7 @@ app.get('/connect/twitter', async (req, res) => {
 
     req.session.oauth = {
       token: oauthToken,
-      tokenSecret: oauthTokenSecret
+      tokenSecret: oauthTokenSecret,
     };
 
     // Save session to persist oauth token and tokenSecret
@@ -96,8 +95,6 @@ app.get('/connect/twitter', async (req, res) => {
 app.get('/connect/twitter/callback', async (req, res) => {
   const { oauth_token, oauth_verifier } = req.query;
 
-  console.log('Callback received:', { oauth_token, oauth_verifier });
-
   if (!oauth_token || !oauth_verifier) {
     return res.status(400).json({ error: 'Missing oauth_token or oauth_verifier' });
   }
@@ -114,12 +111,12 @@ app.get('/connect/twitter/callback', async (req, res) => {
   const requestData = {
     url: 'https://api.twitter.com/oauth/access_token',
     method: 'POST',
-    data: { oauth_verifier }
+    data: { oauth_verifier },
   };
 
   const token = {
     key: oauth_token,
-    secret: req.session.oauth.tokenSecret
+    secret: req.session.oauth.tokenSecret,
   };
 
   try {
@@ -145,7 +142,7 @@ app.get('/connect/twitter/callback', async (req, res) => {
       accessToken,
       accessTokenSecret,
       username: screenName,
-      userId
+      userId,
     };
     delete req.session.oauth;
     await new Promise((resolve, reject) => {
@@ -165,19 +162,7 @@ app.get('/connect/twitter/callback', async (req, res) => {
   }
 });
 
-  app.get('/get/twitter-status', (req, res) => {
-  if (req.session.twitter) {
-    res.json({
-      connected: true,
-      username: req.session.twitter.username
-    });
-  } else {
-    res.json({
-      connected: false,
-      username: null
-    });
-  }
-});
+// Discord OAuth integration
 const discordOAuth = {
   clientId: process.env.DISCORD_CLIENT_ID,
   clientSecret: process.env.DISCORD_CLIENT_SECRET,
@@ -219,7 +204,7 @@ app.get('/connect/discord/callback', async (req, res) => {
     req.session.discord = {
       username: discordUsername,
       id: userResponse.data.id,
-      accessToken: access_token
+      accessToken: access_token,
     };
 
     res.redirect('https://surabaya-blockchain-alliance-sand.vercel.app/setup');
@@ -228,78 +213,64 @@ app.get('/connect/discord/callback', async (req, res) => {
     res.status(500).send('Error connecting to Discord');
   }
 });
-  
-app.get('/get/discord-username', (req, res) => {
-  if (req.session.discord) {
-    res.json({ username: req.session.discord.username });
-  } else {
-    res.json({ username: null });
-  }
+
+// Telegram integration
+app.get('/connect/telegram', (req, res) => {
+  const authUrl = `https://t.me/@CardanoHubIndonesia_bot?start=auth`;
+  res.json({ authUrl });
 });
 
-app.get('/connect/telegram', (req, res) => {
-    const authUrl = `https://t.me/@CardanoHubIndonesia_bot?start=auth`;
-    res.json({ authUrl });
+app.post('/connect/telegram/callback', (req, res) => {
+  const { hash, id, username, first_name, last_name } = req.body;
+
+  if (!hash || !id || !username || !first_name || !last_name) {
+    return res.status(400).send('Invalid Telegram callback parameters');
+  }
+
+  const dataCheckString = `${id}${first_name}${last_name}${username}${process.env.TELEGRAM_BOT_TOKEN}`;
+
+  const hashCheck = crypto.createHmac('sha256', process.env.TELEGRAM_BOT_TOKEN)
+    .update(dataCheckString)
+    .digest('hex');
+
+  if (hash !== hashCheck) {
+    return res.status(400).send('Telegram authentication failed');
+  }
+
+  req.session.telegram = { id, username, first_name, last_name };
+
+  res.json({
+    success: true,
+    telegramUser: { id, username, first_name, last_name },
   });
-  
-  app.post('/connect/telegram/callback', (req, res) => {
-    const { hash, id, username, first_name, last_name } = req.body;
-  
-    // Check if all required parameters are present
-    if (!hash || !id || !username || !first_name || !last_name) {
-      return res.status(400).send('Invalid Telegram callback parameters');
-    }
-  
-    // Recreate the data string to generate the hash
-    const dataCheckString = `${id}${first_name}${last_name}${username}${process.env.TELEGRAM_BOT_TOKEN}`;
-  
-    // Generate hash using Telegram bot token for verification
-    const hashCheck = crypto.createHmac('sha256', process.env.TELEGRAM_BOT_TOKEN)
-      .update(dataCheckString)
-      .digest('hex');
-  
-    // Compare the hash from the callback with the generated one
-    if (hash !== hashCheck) {
-      return res.status(400).send('Telegram authentication failed');
-    }
-  
-    // Save user details in the session
-    req.session.telegram = { id, username, first_name, last_name };
-  
-    // Respond with user details if authentication is successful
-    res.json({
-      success: true,
-      telegramUser: { id, username, first_name, last_name }
-    });
-  });
-  
-  
-  app.get('/get/telegram-user', (req, res) => {
-    if (req.session.telegram) {
-      res.json({ telegramUser: req.session.telegram });
-    } else {
-      res.json({ telegramUser: null });
-    }
-  });
+});
+
+app.get('/get/telegram-user', (req, res) => {
+  if (req.session.telegram) {
+    res.json({ telegramUser: req.session.telegram });
+  } else {
+    res.json({ telegramUser: null });
+  }
+});
 
 // Profile Save Endpoint
 app.post('/save-profile', (req, res) => {
   const { username, twitterUsername, discordUsername } = req.body;
-  
+
   const profileData = {
     username,
     twitter: req.session.twitter ? {
       username: twitterUsername || req.session.twitter.username,
-      userId: req.session.twitter.userId
+      userId: req.session.twitter.userId,
     } : null,
     discord: req.session.discord ? {
       username: discordUsername || req.session.discord.username,
-      userId: req.session.discord.id
+      userId: req.session.discord.id,
     } : null,
     telegram: req.session.telegram ? {
       username: req.session.telegram.username,
-      userId: req.session.telegram.id
-    } : null
+      userId: req.session.telegram.id,
+    } : null,
   };
 
   console.log('Saved profile:', profileData);

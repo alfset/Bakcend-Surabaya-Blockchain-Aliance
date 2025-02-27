@@ -26,7 +26,6 @@
     "node-fetch": "^3.3.2",
     "node-telegram-bot-api": "^0.66.0",
     "oauth": "^0.10.0",
-    "next-iron-session": "^4.2.0",
     "iron-session": "^8.0.4",
     "oauth-1.0a": "^2.2.6",
     "passport": "^0.7.0",

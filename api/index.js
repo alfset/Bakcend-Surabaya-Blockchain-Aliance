@@ -3,7 +3,7 @@ import cors from 'cors';
 import axios from 'axios';
 import OAuth from 'oauth-1.0a';
 import crypto from 'crypto';
-import { withIronSession } from 'next-iron-session';
+import { withIronSession } from 'iron-session';
 import dotenv from 'dotenv';
 
 dotenv.config();

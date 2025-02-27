@@ -47,7 +47,7 @@ app.get('/connect/twitter', async (req, res) => {
     url: 'https://api.twitter.com/oauth/request_token',
     method: 'POST',
     data: {
-      oauth_callback: 'http://localhost:5000/connect/twitter/callback'
+      oauth_callback: 'https://bakcend-surabaya-blockchain-aliance.vercel.app/connect/twitter/callback'
     }
   };
 
@@ -179,7 +179,7 @@ app.get('/connect/twitter/callback', async (req, res) => {
 const discordOAuth = {
   clientId: process.env.DISCORD_CLIENT_ID,
   clientSecret: process.env.DISCORD_CLIENT_SECRET,
-  redirectUri: 'http://localhost:5000/connect/discord/callback',
+  redirectUri: 'https://bakcend-surabaya-blockchain-aliance.vercel.app/connect/discord/callback',
 };
 
 app.get('/connect/discord', (req, res) => {

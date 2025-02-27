@@ -42,6 +42,7 @@ const oauth = new OAuth({
 });
 
 // Twitter OAuth Flow - Step 1: Get Request Token
+// Twitter OAuth Flow - Step 1: Get Request Token
 app.get('/connect/twitter', async (req, res) => {
   const requestData = {
     url: 'https://api.twitter.com/oauth/request_token',
@@ -53,7 +54,7 @@ app.get('/connect/twitter', async (req, res) => {
 
   try {
     const headers = oauth.toHeader(oauth.authorize(requestData));
-    
+
     const response = await axios.post(
       requestData.url,
       new URLSearchParams({ oauth_callback: requestData.data.oauth_callback }),
@@ -73,6 +74,7 @@ app.get('/connect/twitter', async (req, res) => {
       tokenSecret: oauthTokenSecret
     };
 
+    // Save session to persist oauth token and tokenSecret
     await new Promise((resolve, reject) => {
       req.session.save((err) => {
         if (err) {
@@ -90,79 +92,79 @@ app.get('/connect/twitter', async (req, res) => {
     res.status(500).json({ error: 'Error initiating Twitter authentication' });
   }
 });
+
 app.get('/connect/twitter/callback', async (req, res) => {
-    const { oauth_token, oauth_verifier } = req.query;
-  
-    console.log('Callback received:', { oauth_token, oauth_verifier });
-  
-    if (!oauth_token || !oauth_verifier) {
-      return res.status(400).json({ error: 'Missing oauth_token or oauth_verifier' });
+  const { oauth_token, oauth_verifier } = req.query;
+
+  console.log('Callback received:', { oauth_token, oauth_verifier });
+
+  if (!oauth_token || !oauth_verifier) {
+    return res.status(400).json({ error: 'Missing oauth_token or oauth_verifier' });
+  }
+
+  if (!req.session.oauth || !req.session.oauth.tokenSecret) {
+    return res.status(400).json({ error: 'Session expired or invalid. Please try connecting again.' });
+  }
+
+  if (req.session.oauth.token !== oauth_token) {
+    return res.status(400).json({ error: 'OAuth token mismatch' });
+  }
+
+  // Continue OAuth exchange to get access token
+  const requestData = {
+    url: 'https://api.twitter.com/oauth/access_token',
+    method: 'POST',
+    data: { oauth_verifier }
+  };
+
+  const token = {
+    key: oauth_token,
+    secret: req.session.oauth.tokenSecret
+  };
+
+  try {
+    const headers = oauth.toHeader(oauth.authorize(requestData, token));
+
+    const response = await axios.post(
+      requestData.url,
+      new URLSearchParams({ oauth_verifier }),
+      { headers }
+    );
+
+    const params = new URLSearchParams(response.data);
+    const accessToken = params.get('oauth_token');
+    const accessTokenSecret = params.get('oauth_token_secret');
+    const screenName = params.get('screen_name');
+    const userId = params.get('user_id');
+
+    if (!accessToken || !accessTokenSecret) {
+      throw new Error('Failed to get access tokens');
     }
-  
-    if (!req.session.oauth || !req.session.oauth.tokenSecret) {
-      return res.status(400).json({ error: 'Session expired or invalid. Please try connecting again.' });
-    }
-  
-    if (req.session.oauth.token !== oauth_token) {
-      return res.status(400).json({ error: 'OAuth token mismatch' });
-    }
-  
-    // Make sure you exchange the oauth_verifier for the access token here
-    const requestData = {
-      url: 'https://api.twitter.com/oauth/access_token',
-      method: 'POST',
-      data: { oauth_verifier }
+
+    req.session.twitter = {
+      accessToken,
+      accessTokenSecret,
+      username: screenName,
+      userId
     };
-  
-    const token = {
-      key: oauth_token,
-      secret: req.session.oauth.tokenSecret
-    };
-  
-    try {
-      const headers = oauth.toHeader(oauth.authorize(requestData, token));
-      
-      const response = await axios.post(
-        requestData.url,
-        new URLSearchParams({ oauth_verifier }),
-        { headers }
-      );
-  
-      const params = new URLSearchParams(response.data);
-      const accessToken = params.get('oauth_token');
-      const accessTokenSecret = params.get('oauth_token_secret');
-      const screenName = params.get('screen_name');
-      const userId = params.get('user_id');
-  
-      if (!accessToken || !accessTokenSecret) {
-        throw new Error('Failed to get access tokens');
-      }
-  
-      req.session.twitter = {
-        accessToken,
-        accessTokenSecret,
-        username: screenName,
-        userId
-      };
-  
-      delete req.session.oauth;
-  
-      await new Promise((resolve, reject) => {
-        req.session.save((err) => {
-          if (err) {
-            console.error('Session save error:', err);
-            reject(err);
-          }
-          resolve();
-        });
+    delete req.session.oauth;
+    await new Promise((resolve, reject) => {
+      req.session.save((err) => {
+        if (err) {
+          console.error('Session save error:', err);
+          reject(err);
+        }
+        resolve();
       });
-  
-      res.redirect('https://surabaya-blockchain-alliance-sand.vercel.app/setup');
-    } catch (error) {
-      console.error('Error in Twitter callback:', error);
-      res.status(500).json({ error: 'Error completing Twitter authentication' });
-    }
-  });
+    });
+
+    res.redirect('https://surabaya-blockchain-alliance-sand.vercel.app/setup');
+  } catch (error) {
+    console.error('Error in Twitter callback:', error);
+    res.status(500).json({ error: 'Error completing Twitter authentication' });
+  }
+});
+
   app.get('/get/twitter-status', (req, res) => {
   if (req.session.twitter) {
     res.json({
@@ -236,8 +238,7 @@ app.get('/get/discord-username', (req, res) => {
 });
 
 app.get('/connect/telegram', (req, res) => {
-    // Logic to generate the Telegram authentication URL
-    const authUrl = `https://t.me/@CardanoHubIndonesia_bot?start=auth`; // Your bot's Telegram URL
+    const authUrl = `https://t.me/@CardanoHubIndonesia_bot?start=auth`;
     res.json({ authUrl });
   });
   

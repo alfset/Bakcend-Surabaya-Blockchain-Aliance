@@ -27,6 +27,7 @@
     "node-telegram-bot-api": "^0.66.0",
     "oauth": "^0.10.0",
     "next-iron-session": "^4.2.0",
+    "iron-session": "^8.0.4",
     "oauth-1.0a": "^2.2.6",
     "passport": "^0.7.0",
     "passport-github2": "^0.1.12",

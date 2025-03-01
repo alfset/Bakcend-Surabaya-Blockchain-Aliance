@@ -60,20 +60,20 @@ pub fn validate(
 
 // Test: Successfully mint an event NFT with valid metadata
 test mint_event_nft_success() {
-  let issuer = VerificationKeyHash(#[01, 02, 03]) 
-  let policy_id = PolicyId(#[04, 05, 06])
-  let platform_address = Address { payment_credential: ScriptHash(#[07, 08, 09]), stake_credential: None }
-  let store_address = Address { payment_credential: ScriptHash(#[0a, 0b, 0c]), stake_credential: None }
-  let user_address = Address { payment_credential: ScriptHash(#[0d, 0e, 0f]), stake_credential: None }
-  let platform_fee = 2000000 
+  let issuer: VerificationKeyHash = #[0x01] 
+  let policy_id: PolicyId = #[0x04, 0x05, 0x06]  
+  let platform_address = Address { payment_credential: ScriptHash(#[0x07, 0x08, 0x09]), stake_credential: None }
+  let store_address = Address { payment_credential: ScriptHash(#[0x0a, 0x0b, 0x0c]), stake_credential: None }
+  let user_address = Address { payment_credential: ScriptHash(#[0x0d, 0x0e, 0x07f]), stake_credential: None }
+  let platform_fee = 2000000
 
   // Minted assets: reference token (prefix "100") and user token (prefix "222")
   let ref_asset_name = bytearray.concat(cip68.prefix_100, encode_utf8("event1"))
   let user_asset_name = bytearray.concat(cip68.prefix_222, encode_utf8("event1"))
   let mint = Value([
-    (policy_id, [
-      (ref_asset_name, 1),
-      (user_asset_name, 1)
+    (PolicyId(policy_id), [
+      (AssetName(ref_asset_name), 1),
+      (AssetName(user_asset_name), 1)
     ])
   ])
 
@@ -86,7 +86,7 @@ test mint_event_nft_success() {
     },
     Output {
       address: store_address,
-      value: Value([(policy_id, [(ref_asset_name, 1)])]),
+      value: Value([(PolicyId(policy_id), [(AssetName(ref_asset_name), 1)])]),
       datum: Some(InlineDatum(CIP68 {
         url: encode_utf8("https://example.com/event"),
         event_name: encode_utf8("Concert 2025"),
@@ -97,46 +97,53 @@ test mint_event_nft_success() {
     },
     Output {
       address: user_address,
-      value: Value([(policy_id, [(user_asset_name, 1)])]), 
+      value: Value([(PolicyId(policy_id), [(AssetName(user_asset_name), 1)])]), 
       datum: None
     }
   ]
 
+  // Transaction with no inputs (simplified for test)
   let tx = Transaction {
     inputs: [],
     outputs: outputs,
     extra_signatories: [issuer],
     mint: mint,
-    .. 
+    fee: 0,
+    ttl: None,
+    certificates: [],
+    withdrawals: [],
+    auxiliary_data: None,
+    validity_start: None,
+    witnesses: []
   }
 
   validate(
-    MintRedeemer::Mint,
+    Mint,
     platform_address,
     platform_fee,
     store_address,
     user_address,
     issuer,
-    policy_id,
+    PolicyId(policy_id),
     tx
   ) == True
 }
 
 // Test: Fail minting an event NFT with missing metadata (empty URL)
 test mint_event_nft_missing_url() {
-  let issuer = VerificationKeyHash(#[01, 02, 03])
-  let policy_id = PolicyId(#[04, 05, 06])
-  let platform_address = Address { payment_credential: ScriptHash(#[07, 08, 09]), stake_credential: None }
-  let store_address = Address { payment_credential: ScriptHash(#[0a, 0b, 0c]), stake_credential: None }
-  let user_address = Address { payment_credential: ScriptHash(#[0d, 0e, 0f]), stake_credential: None }
+  let issuer: VerificationKeyHash = #[0x01]  
+  let policy_id: PolicyId = #[0x04, 0x05, 0x06]  
+  let platform_address = Address { payment_credential: ScriptHash(#[0x07, 0x08, 0x09]), stake_credential: None }
+  let store_address = Address { payment_credential: ScriptHash(#[0x0a, 0x0b, 0x0c]), stake_credential: None }
+  let user_address = Address { payment_credential: ScriptHash(#[0x0d, 0x0e, 0x0f]), stake_credential: None }
   let platform_fee = 2000000
 
   let ref_asset_name = bytearray.concat(cip68.prefix_100, encode_utf8("event2"))
   let user_asset_name = bytearray.concat(cip68.prefix_222, encode_utf8("event2"))
   let mint = Value([
-    (policy_id, [
-      (ref_asset_name, 1),
-      (user_asset_name, 1)
+    (PolicyId(policy_id), [
+      (AssetName(ref_asset_name), 1),
+      (AssetName(user_asset_name), 1)
     ])
   ])
 
@@ -148,9 +155,9 @@ test mint_event_nft_missing_url() {
     },
     Output {
       address: store_address,
-      value: Value([(policy_id, [(ref_asset_name, 1)])]),
+      value: Value([(PolicyId(policy_id), [(AssetName(ref_asset_name), 1)])]),
       datum: Some(InlineDatum(CIP68 {
-        url: #[],
+        url: #[], // Empty URL should fail
         event_name: encode_utf8("Concert 2025"),
         image: encode_utf8("https://example.com/image.jpg"),
         date: encode_utf8("2025-03-01"),
@@ -159,7 +166,7 @@ test mint_event_nft_missing_url() {
     },
     Output {
       address: user_address,
-      value: Value([(policy_id, [(user_asset_name, 1)])]),
+      value: Value([(PolicyId(policy_id), [(AssetName(user_asset_name), 1)])]),
       datum: None
     }
   ]
@@ -169,37 +176,43 @@ test mint_event_nft_missing_url() {
     outputs: outputs,
     extra_signatories: [issuer],
     mint: mint,
-    ..
+    fee: 0,
+    ttl: None,
+    certificates: [],
+    withdrawals: [],
+    auxiliary_data: None,
+    validity_start: None,
+    witnesses: []
   }
 
   validate(
-    MintRedeemer::Mint,
+    Mint,
     platform_address,
     platform_fee,
     store_address,
     user_address,
     issuer,
-    policy_id,
+    PolicyId(policy_id),
     tx
   ) == False
 }
 
 // Test: Fail minting an event NFT with incorrect issuer signature
 test mint_event_nft_wrong_signature() {
-  let issuer = VerificationKeyHash(#[01, 02, 03])
-  let wrong_signer = VerificationKeyHash(#[ff, ff, ff]) // Different from issuer
-  let policy_id = PolicyId(#[04, 05, 06])
-  let platform_address = Address { payment_credential: ScriptHash(#[07, 08, 09]), stake_credential: None }
-  let store_address = Address { payment_credential: ScriptHash(#[0a, 0b, 0c]), stake_credential: None }
-  let user_address = Address { payment_credential: ScriptHash(#[0d, 0e, 0f]), stake_credential: None }
+  let issuer: VerificationKeyHash = #[0x01]  
+  let policy_id: PolicyId = #[0x04, 0x05, 0x06]  
+    let wrong_signer: VerificationKeyHash = #[0x00ff] 
+  let platform_address = Address { payment_credential: ScriptHash(#[0x07, 0x08, 0x09]), stake_credential: None }
+  let store_address = Address { payment_credential: ScriptHash(#[0x0a, 0x0b, 0x0c]), stake_credential: None }
+  let user_address = Address { payment_credential: ScriptHash(#[0x0d, 0x0e, 0x0f]), stake_credential: None }
   let platform_fee = 2000000
 
   let ref_asset_name = bytearray.concat(cip68.prefix_100, encode_utf8("event3"))
   let user_asset_name = bytearray.concat(cip68.prefix_222, encode_utf8("event3"))
   let mint = Value([
-    (policy_id, [
-      (ref_asset_name, 1),
-      (user_asset_name, 1)
+    (PolicyId(policy_id), [
+      (AssetName(ref_asset_name), 1),
+      (AssetName(user_asset_name), 1)
     ])
   ])
 
@@ -211,7 +224,7 @@ test mint_event_nft_wrong_signature() {
     },
     Output {
       address: store_address,
-      value: Value([(policy_id, [(ref_asset_name, 1)])]),
+      value: Value([(PolicyId(policy_id), [(AssetName(ref_asset_name), 1)])]),
       datum: Some(InlineDatum(CIP68 {
         url: encode_utf8("https://example.com/event"),
         event_name: encode_utf8("Concert 2025"),
@@ -222,7 +235,7 @@ test mint_event_nft_wrong_signature() {
     },
     Output {
       address: user_address,
-      value: Value([(policy_id, [(user_asset_name, 1)])]),
+      value: Value([(PolicyId(policy_id), [(AssetName(user_asset_name), 1)])]),
       datum: None
     }
   ]
@@ -230,19 +243,25 @@ test mint_event_nft_wrong_signature() {
   let tx = Transaction {
     inputs: [],
     outputs: outputs,
-    extra_signatories: [wrong_signer], 
+    extra_signatories: [wrong_signer],
     mint: mint,
-    ..
+    fee: 0,
+    ttl: None,
+    certificates: [],
+    withdrawals: [],
+    auxiliary_data: None,
+    validity_start: None,
+    witnesses: []
   }
 
   validate(
-    MintRedeemer::Mint,
+    Mint,
     platform_address,
     platform_fee,
     store_address,
     user_address,
     issuer,
-    policy_id,
+    PolicyId(policy_id),
     tx
   ) == False
 }

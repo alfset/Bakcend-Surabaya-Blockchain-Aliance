@@ -11,7 +11,7 @@ dotenv.config();
 const app = express();
 const port = process.env.PORT || 5000;
 app.use(cors({
-  origin: ['localhost:3000','https://surabaya-blockchain-alliance-sand.vercel.app', 'https://x.com'],
+  origin: ['http://localhost:3000', 'https://x.com'],
   credentials: true,
 }));
 
@@ -25,7 +25,7 @@ app.use(session({
   cookie: {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
+    sameSite: 'lax', 
     maxAge: 60 * 60 * 1000,
   },
 }));
@@ -155,7 +155,7 @@ app.get('/connect/twitter/callback', async (req, res) => {
         });
       });
   
-      res.redirect('localhost:3000/setup');
+      res.redirect('http://localhost:3000/setup');
     } catch (error) {
       console.error('Error in Twitter callback:', error);
       res.status(500).json({ error: 'Error completing Twitter authentication' });
@@ -234,7 +234,7 @@ app.get('/get/discord-username', (req, res) => {
 });
 
 app.get('/connect/telegram', (req, res) => {
-    const authUrl = `https://t.me/@CardanoHubIndonesia_bot?start=auth`;
+    const authUrl = `https://t.me/@CardanoHubIndonesia_bot?start=auth`; 
     res.json({ authUrl });
   });
   

@@ -1,16 +1,17 @@
 import Twit from 'twit';
-import { Client, Intents } from 'discord.js';
 import TelegramBot from 'node-telegram-bot-api';
 import dotenv from 'dotenv';
+import pkg from 'discord.js';
+const { Client, Intents } = pkg;
 
 dotenv.config();
 
-const twitterClient = new Twit({
-  consumer_key: process.env.TWITTER_API_KEY,
-  consumer_secret: process.env.TWITTER_API_SECRET,
-  access_token: process.env.TWITTER_ACCESS_TOKEN,
-  access_token_secret: process.env.TWITTER_ACCESS_TOKEN_SECRET
-});
+  const twitterClient = new Twit({
+    consumer_key: process.env.TWITTER_API_KEY,
+    consumer_secret: process.env.TWITTER_API_SECRET,
+    access_token: process.env.TWITTER_ACCESS_TOKEN,
+    access_token_secret: process.env.TWITTER_ACCESS_TOKEN_SECRET
+  });
 
 const discordClient = new Client({ intents: [Intents.FLAGS.GUILDS] });
 const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN);

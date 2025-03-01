@@ -41,12 +41,13 @@ const oauth = new OAuth({
   },
 });
 
+// Twitter OAuth Flow - Step 1: Get Request Token
 app.get('/connect/twitter', async (req, res) => {
   const requestData = {
     url: 'https://api.twitter.com/oauth/request_token',
     method: 'POST',
     data: {
-      oauth_callback: 'http://localhost:5000/connect/twitter/callback'
+      oauth_callback: 'https://bakcend-surabaya-blockchain-aliance.vercel.app/connect/twitter/callback'
     }
   };
 
@@ -106,6 +107,7 @@ app.get('/connect/twitter/callback', async (req, res) => {
       return res.status(400).json({ error: 'OAuth token mismatch' });
     }
   
+    // Make sure you exchange the oauth_verifier for the access token here
     const requestData = {
       url: 'https://api.twitter.com/oauth/access_token',
       method: 'POST',
@@ -155,7 +157,7 @@ app.get('/connect/twitter/callback', async (req, res) => {
         });
       });
   
-      res.redirect('localhost:3000/setup');
+      res.redirect('https://surabaya-blockchain-alliance-sand.vercel.app/setup');
     } catch (error) {
       console.error('Error in Twitter callback:', error);
       res.status(500).json({ error: 'Error completing Twitter authentication' });
@@ -177,7 +179,7 @@ app.get('/connect/twitter/callback', async (req, res) => {
 const discordOAuth = {
   clientId: process.env.DISCORD_CLIENT_ID,
   clientSecret: process.env.DISCORD_CLIENT_SECRET,
-  redirectUri: 'http://localhost:5000/connect/discord/callback',
+  redirectUri: 'https://bakcend-surabaya-blockchain-aliance.vercel.app/connect/discord/callback',
 };
 
 app.get('/connect/discord', (req, res) => {
@@ -218,7 +220,7 @@ app.get('/connect/discord/callback', async (req, res) => {
       accessToken: access_token
     };
 
-    res.redirect('http://localhost:3000/setup');
+    res.redirect('https://surabaya-blockchain-alliance-sand.vercel.app/setup');
   } catch (error) {
     console.error('Error connecting to Discord:', error.response ? error.response.data : error.message);
     res.status(500).send('Error connecting to Discord');
@@ -234,29 +236,36 @@ app.get('/get/discord-username', (req, res) => {
 });
 
 app.get('/connect/telegram', (req, res) => {
-    const authUrl = `https://t.me/@CardanoHubIndonesia_bot?start=auth`;
+    // Logic to generate the Telegram authentication URL
+    const authUrl = `https://t.me/@CardanoHubIndonesia_bot?start=auth`; // Your bot's Telegram URL
     res.json({ authUrl });
   });
   
   app.post('/connect/telegram/callback', (req, res) => {
     const { hash, id, username, first_name, last_name } = req.body;
   
+    // Check if all required parameters are present
     if (!hash || !id || !username || !first_name || !last_name) {
       return res.status(400).send('Invalid Telegram callback parameters');
     }
   
+    // Recreate the data string to generate the hash
     const dataCheckString = `${id}${first_name}${last_name}${username}${process.env.TELEGRAM_BOT_TOKEN}`;
   
+    // Generate hash using Telegram bot token for verification
     const hashCheck = crypto.createHmac('sha256', process.env.TELEGRAM_BOT_TOKEN)
       .update(dataCheckString)
       .digest('hex');
   
+    // Compare the hash from the callback with the generated one
     if (hash !== hashCheck) {
       return res.status(400).send('Telegram authentication failed');
     }
   
+    // Save user details in the session
     req.session.telegram = { id, username, first_name, last_name };
   
+    // Respond with user details if authentication is successful
     res.json({
       success: true,
       telegramUser: { id, username, first_name, last_name }
@@ -272,6 +281,7 @@ app.get('/connect/telegram', (req, res) => {
     }
   });
 
+// Profile Save Endpoint
 app.post('/save-profile', (req, res) => {
   const { username, twitterUsername, discordUsername } = req.body;
   

@@ -1,5 +1,5 @@
 import express from 'express';
-import { checkTwitterStatus, checkDiscordStatus, checkTelegramStatus } from '../controllers/socialController';
+import { checkTwitterStatus, checkDiscordStatus, checkTelegramStatus } from '../controllers/socialController.js';
 
 const router = express.Router();
 

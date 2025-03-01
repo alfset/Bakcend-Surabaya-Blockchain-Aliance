@@ -1,32 +1,33 @@
 import express from 'express';
 import cors from 'cors';
-import session from 'express-session';
-import dotenv from 'dotenv';
 import axios from 'axios';
 import OAuth from 'oauth-1.0a';
 import crypto from 'crypto';
+import { withIronSession } from 'iron-session';
+import dotenv from 'dotenv';
 
 dotenv.config();
 
 const app = express();
 const port = process.env.PORT || 5000;
+
 app.use(cors({
-  origin: ['localhost:3000','https://surabaya-blockchain-alliance-sand.vercel.app', 'https://x.com'],
+  origin: ['https://surabaya-blockchain-alliance-sand.vercel.app', 'https://x.com'],
   credentials: true,
 }));
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-app.use(session({
-  secret: process.env.SESSION_SECRET || 'your_secret_key',
-  resave: false,
-  saveUninitialized: false,
-  cookie: {
+// Use iron-session for session management
+app.use(withIronSession({
+  password: process.env.SESSION_SECRET || 'your_secret_key',
+  cookieName: 'cardanohub-session',
+  cookieOptions: {
+    secure: process.env.NODE_ENV === 'production', // Should be true on production
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
-    maxAge: 60 * 60 * 1000,
+    maxAge: 60 * 60 * 1000, // 1 hour
   },
 }));
 
@@ -41,12 +42,13 @@ const oauth = new OAuth({
   },
 });
 
+// Twitter OAuth Flow - Step 1: Get Request Token
 app.get('/connect/twitter', async (req, res) => {
   const requestData = {
     url: 'https://api.twitter.com/oauth/request_token',
     method: 'POST',
     data: {
-      oauth_callback: 'http://localhost:5000/connect/twitter/callback'
+      oauth_callback: 'https://bakcend-surabaya-blockchain-aliance.vercel.app/connect/twitter/callback',
     }
   };
 
@@ -72,15 +74,7 @@ app.get('/connect/twitter', async (req, res) => {
       tokenSecret: oauthTokenSecret
     };
 
-    await new Promise((resolve, reject) => {
-      req.session.save((err) => {
-        if (err) {
-          console.error('Session save error:', err);
-          reject(err);
-        }
-        resolve();
-      });
-    });
+    await req.session.save();
 
     const authUrl = `https://api.twitter.com/oauth/authenticate?oauth_token=${oauthToken}`;
     res.json({ authUrl });
@@ -89,79 +83,72 @@ app.get('/connect/twitter', async (req, res) => {
     res.status(500).json({ error: 'Error initiating Twitter authentication' });
   }
 });
+
+// Twitter OAuth Callback - Step 2: Handle Callback
 app.get('/connect/twitter/callback', async (req, res) => {
-    const { oauth_token, oauth_verifier } = req.query;
-  
-    console.log('Callback received:', { oauth_token, oauth_verifier });
-  
-    if (!oauth_token || !oauth_verifier) {
-      return res.status(400).json({ error: 'Missing oauth_token or oauth_verifier' });
+  const { oauth_token, oauth_verifier } = req.query;
+
+  if (!oauth_token || !oauth_verifier) {
+    return res.status(400).json({ error: 'Missing oauth_token or oauth_verifier' });
+  }
+
+  if (!req.session.oauth || !req.session.oauth.tokenSecret) {
+    return res.status(400).json({ error: 'Session expired or invalid. Please try connecting again.' });
+  }
+
+  if (req.session.oauth.token !== oauth_token) {
+    return res.status(400).json({ error: 'OAuth token mismatch' });
+  }
+
+  const requestData = {
+    url: 'https://api.twitter.com/oauth/access_token',
+    method: 'POST',
+    data: { oauth_verifier }
+  };
+
+  const token = {
+    key: oauth_token,
+    secret: req.session.oauth.tokenSecret
+  };
+
+  try {
+    const headers = oauth.toHeader(oauth.authorize(requestData, token));
+    
+    const response = await axios.post(
+      requestData.url,
+      new URLSearchParams({ oauth_verifier }),
+      { headers }
+    );
+
+    const params = new URLSearchParams(response.data);
+    const accessToken = params.get('oauth_token');
+    const accessTokenSecret = params.get('oauth_token_secret');
+    const screenName = params.get('screen_name');
+    const userId = params.get('user_id');
+
+    if (!accessToken || !accessTokenSecret) {
+      throw new Error('Failed to get access tokens');
     }
-  
-    if (!req.session.oauth || !req.session.oauth.tokenSecret) {
-      return res.status(400).json({ error: 'Session expired or invalid. Please try connecting again.' });
-    }
-  
-    if (req.session.oauth.token !== oauth_token) {
-      return res.status(400).json({ error: 'OAuth token mismatch' });
-    }
-  
-    const requestData = {
-      url: 'https://api.twitter.com/oauth/access_token',
-      method: 'POST',
-      data: { oauth_verifier }
+
+    req.session.twitter = {
+      accessToken,
+      accessTokenSecret,
+      username: screenName,
+      userId
     };
-  
-    const token = {
-      key: oauth_token,
-      secret: req.session.oauth.tokenSecret
-    };
-  
-    try {
-      const headers = oauth.toHeader(oauth.authorize(requestData, token));
-      
-      const response = await axios.post(
-        requestData.url,
-        new URLSearchParams({ oauth_verifier }),
-        { headers }
-      );
-  
-      const params = new URLSearchParams(response.data);
-      const accessToken = params.get('oauth_token');
-      const accessTokenSecret = params.get('oauth_token_secret');
-      const screenName = params.get('screen_name');
-      const userId = params.get('user_id');
-  
-      if (!accessToken || !accessTokenSecret) {
-        throw new Error('Failed to get access tokens');
-      }
-  
-      req.session.twitter = {
-        accessToken,
-        accessTokenSecret,
-        username: screenName,
-        userId
-      };
-  
-      delete req.session.oauth;
-  
-      await new Promise((resolve, reject) => {
-        req.session.save((err) => {
-          if (err) {
-            console.error('Session save error:', err);
-            reject(err);
-          }
-          resolve();
-        });
-      });
-  
-      res.redirect('localhost:3000/setup');
-    } catch (error) {
-      console.error('Error in Twitter callback:', error);
-      res.status(500).json({ error: 'Error completing Twitter authentication' });
-    }
-  });
-  app.get('/get/twitter-status', (req, res) => {
+
+    delete req.session.oauth;
+    await req.session.save();
+
+    res.redirect('https://surabaya-blockchain-alliance-sand.vercel.app/setup');
+  } catch (error) {
+    console.error('Error in Twitter callback:', error);
+    res.status(500).json({ error: 'Error completing Twitter authentication' });
+  }
+});
+
+// Get Twitter status
+app.get('/get/twitter-status', (req, res) => {
   if (req.session.twitter) {
     res.json({
       connected: true,
@@ -174,10 +161,12 @@ app.get('/connect/twitter/callback', async (req, res) => {
     });
   }
 });
+
+// Discord OAuth
 const discordOAuth = {
   clientId: process.env.DISCORD_CLIENT_ID,
   clientSecret: process.env.DISCORD_CLIENT_SECRET,
-  redirectUri: 'http://localhost:5000/connect/discord/callback',
+  redirectUri: 'https://bakcend-surabaya-blockchain-aliance.vercel.app/connect/discord/callback',
 };
 
 app.get('/connect/discord', (req, res) => {
@@ -218,13 +207,16 @@ app.get('/connect/discord/callback', async (req, res) => {
       accessToken: access_token
     };
 
-    res.redirect('http://localhost:3000/setup');
+    await req.session.save();
+
+    res.redirect('https://surabaya-blockchain-alliance-sand.vercel.app/setup');
   } catch (error) {
     console.error('Error connecting to Discord:', error.response ? error.response.data : error.message);
     res.status(500).send('Error connecting to Discord');
   }
 });
-  
+
+// Get Discord username
 app.get('/get/discord-username', (req, res) => {
   if (req.session.discord) {
     res.json({ username: req.session.discord.username });
@@ -233,48 +225,49 @@ app.get('/get/discord-username', (req, res) => {
   }
 });
 
+// Telegram OAuth
 app.get('/connect/telegram', (req, res) => {
-    const authUrl = `https://t.me/@CardanoHubIndonesia_bot?start=auth`;
-    res.json({ authUrl });
-  });
-  
-  app.post('/connect/telegram/callback', (req, res) => {
-    const { hash, id, username, first_name, last_name } = req.body;
-  
-    if (!hash || !id || !username || !first_name || !last_name) {
-      return res.status(400).send('Invalid Telegram callback parameters');
-    }
-  
-    const dataCheckString = `${id}${first_name}${last_name}${username}${process.env.TELEGRAM_BOT_TOKEN}`;
-  
-    const hashCheck = crypto.createHmac('sha256', process.env.TELEGRAM_BOT_TOKEN)
-      .update(dataCheckString)
-      .digest('hex');
-  
-    if (hash !== hashCheck) {
-      return res.status(400).send('Telegram authentication failed');
-    }
-  
-    req.session.telegram = { id, username, first_name, last_name };
-  
-    res.json({
-      success: true,
-      telegramUser: { id, username, first_name, last_name }
-    });
-  });
-  
-  
-  app.get('/get/telegram-user', (req, res) => {
-    if (req.session.telegram) {
-      res.json({ telegramUser: req.session.telegram });
-    } else {
-      res.json({ telegramUser: null });
-    }
-  });
+  const authUrl = `https://t.me/@CardanoHubIndonesia_bot?start=auth`; // Your bot's Telegram URL
+  res.json({ authUrl });
+});
 
+app.post('/connect/telegram/callback', (req, res) => {
+  const { hash, id, username, first_name, last_name } = req.body;
+
+  if (!hash || !id || !username || !first_name || !last_name) {
+    return res.status(400).send('Invalid Telegram callback parameters');
+  }
+
+  const dataCheckString = `${id}${first_name}${last_name}${username}${process.env.TELEGRAM_BOT_TOKEN}`;
+  const hashCheck = crypto.createHmac('sha256', process.env.TELEGRAM_BOT_TOKEN)
+    .update(dataCheckString)
+    .digest('hex');
+
+  if (hash !== hashCheck) {
+    return res.status(400).send('Telegram authentication failed');
+  }
+
+  req.session.telegram = { id, username, first_name, last_name };
+
+  res.json({
+    success: true,
+    telegramUser: { id, username, first_name, last_name }
+  });
+});
+
+// Get Telegram user info
+app.get('/get/telegram-user', (req, res) => {
+  if (req.session.telegram) {
+    res.json({ telegramUser: req.session.telegram });
+  } else {
+    res.json({ telegramUser: null });
+  }
+});
+
+// Profile Save Endpoint
 app.post('/save-profile', (req, res) => {
   const { username, twitterUsername, discordUsername } = req.body;
-  
+
   const profileData = {
     username,
     twitter: req.session.twitter ? {

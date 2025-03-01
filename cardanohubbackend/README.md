@@ -1,4 +1,4 @@
-# Cardano Event NFT Validator
+# Cardano Event NFT
 
 ## Overview
 

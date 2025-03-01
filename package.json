@@ -23,10 +23,17 @@
     "google-auth-library": "^9.15.0",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.10.1",
+<<<<<<< HEAD
     "next-iron-session": "^4.2.0",
     "node-fetch": "^3.3.2",
     "node-telegram-bot-api": "^0.66.0",
     "oauth": "^0.10.0",
+=======
+    "node-fetch": "^3.3.2",
+    "node-telegram-bot-api": "^0.66.0",
+    "oauth": "^0.10.0",
+    "iron-session": "^8.0.4",
+>>>>>>> 393d9d513a1962aa5144cde110c331652c8ad322
     "oauth-1.0a": "^2.2.6",
     "passport": "^0.7.0",
     "passport-github2": "^0.1.12",

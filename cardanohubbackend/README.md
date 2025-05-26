@@ -62,3 +62,150 @@ To build the project, run the following command:
 
 ```sh
 aiken check
+```
+
+# Pools Reward Initiator and Claiming
+## Key Features
+
+- **Minting and Burning Validation:** Ensures proper minting and burning of event claim rewards.
+- **Token Name Validation:** Verifies the correct token name during minting and burning.
+- **Claimer Address Validation:** Confirms the claimer’s address for secure token claiming.
+- **Single Token Transaction:** Ensures only one token is minted or burned per transaction.
+- **UTxO Reference Validation:** Validates specific UTxO references for minting.
+
+---
+
+## Functions
+
+### `claim.spend`
+
+The main function to validate a spending transaction for claiming a **claim reward** by burning a token. It checks whether the transaction:
+
+- Burns exactly one token with the correct `token_name` and amount (`-1`).
+- Includes an input matching the specified `input_ref` with an output address matching the claimer.
+
+**Parameters:**
+
+- `token_name: ByteArray` – Expected name of the token.
+- `policy_id: ByteArray` – Policy ID of the token.
+- `claimer: Address` – Address authorized to claim the token.
+- `_d: Option<Data>` – Optional datum (unused).
+- `_r: Data` – Redeemer data (unused).
+- `input_ref: OutputReference` – Reference to the input UTxO.
+- `tx: Transaction` – The Cardano transaction to validate.
+
+---
+
+### `pools.mint`
+
+Validates minting or burning of claim rewards based on the `Action` redeemer. It ensures:
+
+- Exactly one token is minted (amount == `1`) or burned (amount == `-1`) with the correct `token_name`.
+- For minting, an input matches the specified `utxo_ref`.
+
+**Parameters:**
+
+- `token_name: ByteArray` – Expected name of the token.
+- `utxo_ref: OutputReference` – Reference to the UTxO for minting validation.
+- `rdmr: Action` – Specifies `Mint` or `Burn` action.
+- `policy_id: PolicyId` – Policy ID of the token.
+- `tx: Transaction` – The Cardano transaction to validate.
+
+---
+
+### `get_mint_test_tx`
+
+Generates a mock transaction for testing minting scenarios.
+
+**Parameters:**
+
+- `test_case: TestCase` – Configures the test with `is_mint_info_correct` and `is_token_name_correct`.
+
+**Logic:**
+
+- Sets `token_name` to `"hello world"` if `is_token_name_correct` is `true`, otherwise `"goodbye"`.
+- Mints tokens with amount `1` or `2` based on `is_mint_info_correct`.
+- Returns a completed transaction with one input.
+
+---
+
+### `get_claim_test_tx`
+
+Generates a mock transaction for testing claiming scenarios.
+
+**Parameters:**
+
+- `test_case: TestCase` – Configures the test.
+- `claimer: Address` – Address claiming the token.
+- `utxo: OutputReference` – UTxO reference for the input.
+
+**Logic:**
+
+- Sets `token_name` to `"hello world"` if `is_token_name_correct` is `true`, otherwise `"goodbye"`.
+- Burns tokens with amount `-1` or `-2` based on `is_mint_info_correct`.
+- Returns a completed transaction with one input from claimer.
+
+---
+
+## Types
+
+### `Action`
+
+Represents minting or burning actions.
+
+```aiken
+pub type Action {
+  Mint
+  Burn
+}
+
+```
+## Tests
+
+### ✅ success_mint
+
+- **Description**: Tests successful minting with correct token name (`"hello world"`) and amount (1).
+- **Expected Outcome**: The `pools.mint` validator passes.
+
+---
+
+### ❌ fail_mint_with_more_than_1_mint
+
+- **Description**: Tests minting failure when multiple tokens are minted (amount 2).
+- **Expected Outcome**: The `pools.mint` validator fails.
+
+---
+
+### ❌ fail_mint_without_param_name_minted
+
+- **Description**: Tests minting failure with an incorrect token name (`"goodbye"`).
+- **Expected Outcome**: The `pools.mint` validator fails.
+
+---
+
+### ✅ success_claim
+
+- **Description**: Tests successful claiming with correct token name (`"hello world"`), burn amount (-1), and valid claimer address.
+- **Expected Outcome**: Both `claim.spend` and `pools.mint` (with `Burn`) validators pass.
+
+---
+
+### ❌ fail_claim_without_correct_name
+
+- **Description**: Tests claiming failure with an incorrect token name (`"goodbye"`).
+- **Expected Outcome**: The `claim.spend` and `pools.mint` validators fail.
+
+---
+
+### ❌ fail_claim_without_correct_mint_info
+
+- **Description**: Tests claiming failure with an incorrect burn amount (-2).
+- **Expected Outcome**: The `claim.spend` and `pools.mint` validators fail.
+
+---
+
+### ❌ fail_claim_invalid_claimer
+
+- **Description**: Tests claiming failure with an invalid claimer address.
+- **Expected Outcome**: The `claim.spend` and `pools.mint` validators fail.
+

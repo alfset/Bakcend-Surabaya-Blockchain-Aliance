@@ -1,0 +1,333 @@
+import { Button } from "../components/Button";
+import { readValidators } from "../lib/utils";
+import { Constr, Data, Blockfrost, Lucid, Network } from "lucid-cardano";
+import type { NextPage } from "next";
+import { useCallback, useEffect, useState } from "react";
+
+export async function getServerSideProps(context: {
+  query: { lockAddress: string; txHash: string; outputIndex: string; policyId: string; assetName: string };
+}) {
+  const { lockAddress, txHash, outputIndex, policyId, assetName } = context.query;
+  const validators = readValidators();
+
+  const ENV = {
+    BLOCKFROST_URL: process.env.BLOCKFROST_URL as string,
+    BLOCKFROST_PROJECT_ID: process.env.BLOCKFROST_PROJECT_ID as string,
+    NETWORK: process.env.NETWORK as string,
+  };
+
+  return {
+    props: {
+      ENV,
+      lockAddress: lockAddress || null,
+      txHash: txHash || null,
+      outputIndex: outputIndex ? Number(outputIndex) : null,
+      policyId: policyId || null,
+      assetName: assetName || null,
+      validators,
+    },
+  };
+}
+
+interface State {
+  lucid?: Lucid;
+  lockAddress: string | null;
+  txHash: string | null;
+  outputIndex: number | null;
+  policyId: string | null;
+  assetName: string | null;
+  unlockTxHash?: string;
+  waitingUnlockTx: boolean;
+  error?: string;
+  walletConnected: boolean;
+  availableWallets: string[];
+  callerVkh?: string;
+  callerAddress?: string;
+}
+
+const Redeem: NextPage<ReturnType<typeof getServerSideProps>["props"]> = ({
+  ENV,
+  lockAddress,
+  txHash,
+  outputIndex,
+  policyId,
+  assetName,
+  validators,
+}) => {
+  const [state, setState] = useState<State>({
+    lucid: undefined,
+    lockAddress,
+    txHash,
+    outputIndex,
+    policyId,
+    assetName,
+    unlockTxHash: undefined,
+    waitingUnlockTx: false,
+    error: undefined,
+    walletConnected: false,
+    availableWallets: [],
+    callerVkh: undefined,
+    callerAddress: undefined,
+  });
+
+  const mergeSpecs = useCallback((delta: Partial<State>) => {
+    setState(prev => ({ ...prev, ...delta }));
+  }, []);
+
+  useEffect(() => {
+    async function initLucid() {
+      if (!window.cardano) {
+        mergeSpecs({ error: "No Cardano wallet extensions detected. Install Lace, Eternl, or Nami." });
+        return;
+      }
+      const availableWallets = Object.keys(window.cardano).filter(
+        key => window.cardano[key] && typeof window.cardano[key].enable === "function"
+      );
+      if (!availableWallets.length) {
+        mergeSpecs({ error: "Enable a Cardano wallet: Lace, Eternl, or Nami." });
+        return;
+      }
+      mergeSpecs({ availableWallets });
+      const lucid = await Lucid.new(
+        new Blockfrost(ENV.BLOCKFROST_URL, ENV.BLOCKFROST_PROJECT_ID),
+        ENV.NETWORK as Network
+      );
+      for (const name of ["lace", "eternl", "nami"]) {
+        if (window.cardano[name]) {
+          try {
+            const api = await window.cardano[name].enable();
+            lucid.selectWallet(api);
+            const address = await lucid.wallet.address();
+            const details = lucid.utils.getAddressDetails(address);
+            console.log("Wallet address:", address, "Details:", JSON.stringify(details, (k, v) => (typeof v === "bigint" ? v.toString() : v), 2));
+            const vkh = details.paymentCredential?.hash;
+            if (!vkh) {
+              console.error("Address details:", details);
+              throw new Error(`No payment credential found in wallet address: ${address}`);
+            }
+            mergeSpecs({ lucid, walletConnected: true, callerAddress: address, callerVkh: vkh });
+            return;
+          } catch (err) {
+            console.warn(`Failed to connect to ${name}:`, err);
+          }
+        }
+      }
+      mergeSpecs({ error: "No wallet connected. Please unlock and retry." });
+    }
+    initLucid();
+  }, [ENV, mergeSpecs]);
+
+  /** Converts a hex-string to raw bytes **/
+  const hexToBytes = (hex: string): Uint8Array =>
+    Uint8Array.from(Buffer.from(hex, "hex"));
+
+  /** Converts a Uint8Array to hex string **/
+  const bytesToHex = (bytes: Uint8Array): string =>
+    Buffer.from(bytes).toString("hex").toLowerCase();
+
+  const redeemAirdrop = async (e: React.MouseEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+
+    const { lucid, lockAddress, txHash, outputIndex, policyId, assetName, callerVkh, callerAddress } = state;
+    if (!lucid || !lockAddress || !txHash || outputIndex === null || !policyId || !assetName || !callerVkh || !callerAddress) {
+      mergeSpecs({ error: "Missing required inputs or wallet not connected." });
+      return;
+    }
+
+    try {
+      mergeSpecs({ error: undefined, waitingUnlockTx: true });
+
+      const utxos = await lucid.utxosAt(lockAddress);
+      console.log("UTxOs:", JSON.stringify(utxos, (k, v) => (typeof v === "bigint" ? v.toString() : v), 2));
+      const assetHex = /^[0-9a-fA-F]+$/.test(assetName) ? assetName : Buffer.from(assetName, "utf8").toString("hex");
+      const fullAsset = `${policyId}${assetHex}`;
+
+      const target = utxos
+        .find(u => u.txHash === txHash && u.outputIndex === outputIndex) ||
+        utxos.find(u => u.txHash === txHash) ||
+        utxos.find(u => u.assets[fullAsset] && u.datum);
+
+      if (!target || !target.datum || !target.assets[fullAsset]) {
+        throw new Error("Matching UTxO not found or missing datum/asset.");
+      }
+      console.log("Target UTxO:", JSON.stringify(target, (k, v) => (typeof v === "bigint" ? v.toString() : v), 2));
+
+      const datum = Data.from(target.datum);
+      console.log("Datum:", JSON.stringify(datum, (k, v) => (typeof v === "bigint" ? v.toString() : v), 2));
+      if (!(datum instanceof Constr) || datum.index !== 0 || datum.fields.length !== 7) {
+        throw new Error("Datum structure mismatch.");
+      }
+
+      const [stakeCred, policyIdDatum, tokenName, amount, unknownInt, unknownConstr, claimants] = datum.fields;
+      const callerVkhHex = callerVkh.toLowerCase();
+      let tokenAmt = 0n;
+      let foundClaimant = false;
+      let claimantIndex = -1;
+
+      for (let i = 0; i < (claimants as Constr[]).length; i++) {
+        const c = (claimants as Constr[])[i];
+        if (c instanceof Constr && c.index === 0 && c.fields.length === 2) {
+          const [addr, alloc] = c.fields;
+          if (addr instanceof Constr && addr.index === 0) {
+            const payCred = addr.fields[0];
+            if (payCred instanceof Constr && payCred.index === 0) {
+              const vkhRaw = payCred.fields[0]; // Uint8Array
+              const claimantVkhHex = Buffer.from(vkhRaw as Uint8Array).toString("utf8").toLowerCase();
+              console.log(
+                "Raw vkhRaw bytes:", Array.from(vkhRaw as Uint8Array),
+                "Claimant VKH:", claimantVkhHex,
+                "Caller VKH:", callerVkhHex
+              );
+              if (claimantVkhHex === callerVkhHex) {
+                tokenAmt = BigInt(alloc);
+                foundClaimant = true;
+                claimantIndex = i;
+                break;
+              }
+            }
+          }
+        }
+      }
+
+      if (!foundClaimant || tokenAmt <= 0n) {
+        throw new Error("Caller not in claimants list or has zero allocation.");
+      }
+
+      // Update datum: Remove claimant or set allocation to 0
+      const updatedClaimants = (claimants as Constr[])
+        .filter((_, i) => i !== claimantIndex); // Remove claimant
+        // Alternatively, set allocation to 0:
+        // .map((c, i) => i === claimantIndex ? new Constr(0, [c.fields[0], BigInt(0)]) : c);
+      const updatedDatum = new Constr(0, [
+        stakeCred,
+        policyIdDatum,
+        tokenName,
+        amount,
+        unknownInt,
+        unknownConstr,
+        updatedClaimants,
+      ]);
+      const serializedUpdatedDatum = Data.to(updatedDatum);
+      console.log("Updated Datum:", JSON.stringify(updatedDatum, (k, v) => (typeof v === "bigint" ? v.toString() : v), 2));
+
+      // Calculate remaining assets
+      const remainingTokens = BigInt(target.assets[fullAsset]) - tokenAmt;
+      const remainingLovelace = BigInt(target.assets.lovelace) - (BigInt(amount) / BigInt((claimants as Constr[]).length));
+
+      // Create redeemer with nested Constr
+      console.log("callerVkhHex for redeemer:", callerVkhHex);
+      const redeemer = new Constr(0, [new Constr(0, [callerVkhHex])]);
+      // Alternative 1: Constr 0
+      // const redeemer = new Constr(0, [callerVkhHex]);
+      // Alternative 2: Constr 1 (previous)
+      // const redeemer = new Constr(1, [callerVkhHex]);
+      // Alternative 3: Raw bytes
+      // const redeemer = hexToBytes(callerVkhHex);
+      // const serializedRedeemer = Data.to(redeemer, Data.Bytes());
+      console.log("Redeemer object before serialization:", JSON.stringify(redeemer, (k, v) => (typeof v === "bigint" ? v.toString() : v), 2));
+      const serializedRedeemer = Data.to(redeemer);
+      console.log("Serialized redeemer:", serializedRedeemer);
+      console.log("Validator script:", validators.airdropSpend.script);
+
+      const tx = await lucid
+        .newTx()
+        .collectFrom([target], serializedRedeemer)
+        .attachSpendingValidator({ type: "PlutusV2", script: validators.airdropSpend.script })
+        .payToAddress(callerAddress, {
+          [fullAsset]: tokenAmt,
+          lovelace: BigInt(amount) / BigInt((claimants as Constr[]).length),
+        })
+        .payToContract(lockAddress, { inline: serializedUpdatedDatum }, {
+          [fullAsset]: remainingTokens,
+          lovelace: remainingLovelace,
+        })
+        .complete();
+
+      console.log("Transaction built:", JSON.stringify(tx, (k, v) => (typeof v === "bigint" ? v.toString() : v), 2));
+
+      const signed = await tx.sign().complete();
+      console.log("Transaction signed:", JSON.stringify(signed, (k, v) => (typeof v === "bigint" ? v.toString() : v), 2));
+
+      const hash = await signed.submit();
+      console.log("Transaction submitted, hash:", hash);
+
+      const ok = await lucid.awaitTx(hash);
+      console.log("Transaction confirmed:", ok);
+
+      mergeSpecs({ waitingUnlockTx: false, unlockTxHash: ok ? hash : undefined });
+    } catch (err) {
+      mergeSpecs({
+        waitingUnlockTx: false,
+        error: `Redeem failed: ${err instanceof Error ? err.message : String(err)}`,
+      });
+      console.error("Redeem error:", err);
+    }
+  };
+
+  return (
+    <div className="flex flex-col items-center py-12">
+      <h2>🎁 Redeem Your Airdrop</h2>
+      {!state.walletConnected ? (
+        <>
+          <p>Connect a Cardano wallet:</p>
+          {state.availableWallets.map(w => (
+            <Button
+              key={w}
+              onClick={async () => {
+                try {
+                  const lucid = await Lucid.new(
+                    new Blockfrost(ENV.BLOCKFROST_URL, ENV.BLOCKFROST_PROJECT_ID),
+                    ENV.NETWORK as Network
+                  );
+                  const api = await window.cardano[w].enable();
+                  lucid.selectWallet(api);
+                  const address = await lucid.wallet.address();
+                  const details = lucid.utils.getAddressDetails(address);
+                  console.log("Wallet address:", address, "Details:", JSON.stringify(details, (k, v) => (typeof v === "bigint" ? v.toString() : v), 2));
+                  const vkh = details.paymentCredential?.hash;
+                  if (!vkh) {
+                    console.error("Address details:", details);
+                    throw new Error(`No payment credential found in wallet address: ${address}`);
+                  }
+                  mergeSpecs({ lucid, walletConnected: true, callerAddress: address, callerVkh: vkh });
+                } catch (err) {
+                  mergeSpecs({
+                    error: `Failed to connect to ${w}: ${err instanceof Error ? err.message : String(err)}`,
+                  });
+                  console.error(`Failed to connect to ${w}:`, err);
+                }
+              }}
+            >
+              Connect {w.charAt(0).toUpperCase() + w.slice(1)}
+            </Button>
+          ))}
+        </>
+      ) : (
+        <>
+          {state.callerAddress && <p>Caller Address: <code>{state.callerAddress}</code></p>}
+          {state.callerVkh && <p>Caller VKH: <code>{state.callerVkh}</code></p>}
+          <Button onClick={redeemAirdrop} disabled={state.waitingUnlockTx}>
+            {state.waitingUnlockTx ? "Redeeming..." : "Redeem Airdrop"}
+          </Button>
+        </>
+      )}
+
+      {state.error && <div className="text-red-500 mt-4">{state.error}</div>}
+      {state.unlockTxHash && (
+        <div className="text-green-500 mt-4">
+          ✅ Airdrop redeemed! Tx:{" "}
+          <a
+            href={`https://cardanoscan.io/transaction/${state.unlockTxHash}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline"
+          >
+            {state.unlockTxHash}
+          </a>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default Redeem;

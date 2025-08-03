@@ -1,0 +1,407 @@
+import { TextField } from "../components/Input";
+import { Button } from "../components/Button";
+import { readValidators } from "../lib/utils";
+import { Constr, Data, Blockfrost, Lucid, Network, fromText } from "lucid-cardano";
+import type { NextPage } from "next";
+import { useCallback, useEffect, useState } from "react";
+
+const BASE_URL = "http://localhost:3000/redeem";
+
+export async function getServerSideProps() {
+  const ENV: Record<string, string> = {
+    BLOCKFROST_URL: process.env.BLOCKFROST_URL as string,
+    BLOCKFROST_PROJECT_ID: process.env.BLOCKFROST_PROJECT_ID as string,
+    NETWORK: process.env.NETWORK as string,
+  };
+
+  const validators = readValidators();
+
+  return {
+    props: {
+      ENV,
+      validators,
+    },
+  };
+}
+
+interface State {
+  lucid: Lucid | undefined;
+  policyId: string;
+  assetName: string;
+  giftADA: string;
+  claimants: string; 
+  lockTxHash: string | undefined;
+  waitingLockTx: boolean;
+  lockAddress: string | undefined;
+  utxoTxHash: string | undefined;
+  utxoOutputIndex: number | undefined;
+  url: string | undefined;
+  error: string | undefined;
+  walletConnected: boolean;
+  availableWallets: string[];
+}
+
+const Create: NextPage<{
+  ENV: Record<string, string>;
+  validators: any; // Adjust type based on your utils.ts
+}> = ({ ENV, validators }) => {
+  const [state, setState] = useState<State>({
+    lucid: undefined,
+    policyId: "",
+    assetName: "",
+    giftADA: "",
+    claimants: "",
+    lockTxHash: undefined,
+    waitingLockTx: false,
+    lockAddress: undefined,
+    utxoTxHash: undefined,
+    utxoOutputIndex: undefined,
+    url: undefined,
+    error: undefined,
+    walletConnected: false,
+    availableWallets: [],
+  });
+
+  const mergeSpecs = useCallback((delta: Partial<State>) => {
+    setState((prev) => ({ ...prev, ...delta }));
+  }, []);
+
+  useEffect(() => {
+    async function initLucid() {
+      try {
+        if (!window.cardano) {
+          mergeSpecs({ error: "No Cardano wallet extensions detected. Please install Lace, Eternl, or Nami." });
+          return;
+        }
+
+        const availableWallets = Object.keys(window.cardano).filter(
+          (key) => window.cardano[key] && typeof window.cardano[key].enable === "function"
+        );
+        if (!availableWallets.length) {
+          mergeSpecs({ error: "No compatible Cardano wallets found. Please enable Lace, Eternl, or Nami." });
+          return;
+        }
+
+        mergeSpecs({ availableWallets });
+
+        const lucid = await Lucid.new(
+          new Blockfrost(ENV.BLOCKFROST_URL, ENV.BLOCKFROST_PROJECT_ID),
+          ENV.NETWORK as Network
+        );
+
+        const walletNames = ["lace", "eternl", "nami"];
+        let walletConnected = false;
+        for (const walletName of walletNames) {
+          if (window.cardano[walletName]) {
+            try {
+              const walletApi = await window.cardano[walletName].enable();
+              lucid.selectWallet(walletApi);
+              walletConnected = true;
+              break;
+            } catch (e) {
+              console.warn(`Failed to connect to ${walletName}:`, e);
+            }
+          }
+        }
+
+        if (!walletConnected) {
+          mergeSpecs({ error: "Failed to connect to any wallet. Please ensure Lace, Eternl, or Nami is unlocked and allows connection." });
+          return;
+        }
+
+        // Set lock address from validators
+        const lockAddress = lucid.utils.validatorToAddress(validators.airdropSpend);
+        mergeSpecs({ lucid, walletConnected: true, lockAddress });
+      } catch (e) {
+        mergeSpecs({
+          error: `Unable to initialize Lucid: ${e instanceof Error ? e.message : String(e)}. Check your Blockfrost API key and ensure your wallet is set to the ${ENV.NETWORK} network.`,
+        });
+      }
+    }
+    initLucid();
+  }, [ENV, mergeSpecs, validators]);
+
+  const createAirdrop = async (e: React.MouseEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    if (!state.lucid || !state.lockAddress || !state.walletConnected) {
+      mergeSpecs({ error: "Wallet not connected or lock address not set." });
+      return;
+    }
+
+    mergeSpecs({ waitingLockTx: true });
+
+    try {
+      const lovelace = Number(state.giftADA) * 1000000;
+      if (isNaN(lovelace) || lovelace <= 0) {
+        throw new Error("Invalid ADA amount. Please enter a valid number.");
+      }
+
+      // Validate policyId (hex)
+      if (!/^[0-9a-fA-F]+$/.test(state.policyId)) {
+        throw new Error("Invalid policy ID: must be a valid hex string.");
+      }
+
+      // Validate assetName (hex or alphanumeric)
+      if (!state.assetName || !/^[0-9a-fA-F]*$|^[a-zA-Z0-9]+$/.test(state.assetName)) {
+        throw new Error("Invalid asset name: must be hex or alphanumeric.");
+      }
+
+      // Parse claimants and token allocations (format: "addr1:amount,addr2:amount")
+      const claimantsList = state.claimants
+        .split(",")
+        .map((entry) => entry.trim())
+        .filter((entry) => entry);
+      if (!claimantsList.length) {
+        throw new Error("No valid claimant entries provided.");
+      }
+
+      const claimantData: Array<{ address: string; amount: bigint }> = [];
+      for (const entry of claimantsList) {
+        const [addr, amountStr] = entry.split(":");
+        if (!addr || !amountStr) {
+          throw new Error(`Invalid claimant format '${entry}'. Use 'address:amount'.`);
+        }
+        const amount = BigInt(amountStr);
+        if (isNaN(Number(amount)) || amount <= 0) {
+          throw new Error(`Invalid token amount '${amountStr}' for address '${addr}'.`);
+        }
+        claimantData.push({ address: addr, amount });
+      }
+
+      // Convert claimant addresses to CardanoAddressAddress
+      const claimantAddresses: Array<any> = [];
+      for (const { address } of claimantData) {
+        try {
+          const addressDetails = state.lucid.utils.getAddressDetails(address);
+          if (!addressDetails.paymentCredential?.hash) {
+            throw new Error("No payment credential found in address.");
+          }
+          const paymentCredential = new Constr(0, [addressDetails.paymentCredential.hash]); // VerificationKey
+          const stakeCredential = addressDetails.stakeCredential
+            ? new Constr(0, [new Constr(0, [addressDetails.stakeCredential.hash])]) // Inline Credential
+            : new Constr(1, []); // None
+          const cardanoAddress = new Constr(0, [paymentCredential, stakeCredential]);
+          claimantAddresses.push(cardanoAddress);
+        } catch (err) {
+          throw new Error(`Invalid claimant address '${address}': ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+
+      // Get creator's reward address
+      const rewardAddress = await state.lucid.wallet.rewardAddress();
+      if (!rewardAddress) throw new Error("No reward address found");
+
+      let creatorVkh: string;
+      try {
+        const addressDetails = state.lucid.utils.getAddressDetails(rewardAddress);
+        if (!addressDetails.stakeCredential?.hash) {
+          throw new Error("No staking credential found in reward address.");
+        }
+        creatorVkh = addressDetails.stakeCredential.hash;
+      } catch (err) {
+        throw new Error(`Failed to extract creatorVkh: ${err instanceof Error ? err.message : String(err)}`);
+      }
+
+      // Calculate total tokens to lock
+      const totalTokens = claimantData.reduce((sum, { amount }) => sum + amount, BigInt(0));
+
+      // Construct datum
+      const datum = new Constr(0, [
+        creatorVkh,
+        state.policyId,
+        fromText(state.assetName),
+        BigInt(lovelace),
+        BigInt(0), // claimed
+        new Constr(1, []), // None for tag
+        claimantData.map(({ amount }, i) => new Constr(0, [claimantAddresses[i], amount])),
+      ]);
+
+      // Log fields for debugging
+      console.log("creatorVkh:", creatorVkh);
+      console.log("policyId:", state.policyId);
+      console.log("assetName:", state.assetName);
+      console.log("claimantData:", claimantData);
+      console.log("datum:", JSON.stringify(datum, (k, v) => (typeof v === "bigint" ? v.toString() : v)));
+
+      // Serialize fields
+      try {
+        Data.to(creatorVkh);
+      } catch (err) {
+        throw new Error(`Failed to serialize creatorVkh: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      try {
+        Data.to(state.policyId);
+      } catch (err) {
+        throw new Error(`Failed to serialize policyId: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      try {
+        Data.to(fromText(state.assetName));
+      } catch (err) {
+        throw new Error(`Failed to serialize assetName: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      try {
+        for (const addr of claimantAddresses) {
+          Data.to(addr);
+        }
+      } catch (err) {
+        throw new Error(`Failed to serialize claimant address: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      try {
+        Data.to(datum);
+      } catch (err) {
+        throw new Error(`Failed to serialize datum: ${err instanceof Error ? err.message : String(err)}`);
+      }
+
+      const utxos = await state.lucid.wallet.getUtxos();
+      if (!utxos.length) {
+        mergeSpecs({
+          error: `No UTXOs found in the connected wallet. Please fund your wallet with ADA and tokens on the ${ENV.NETWORK} network.`,
+        });
+        return;
+      }
+      const utxo = utxos[0];
+
+      const assetNameFull = `${state.policyId}${fromText(state.assetName)}`;
+      const tx = await state
+        .lucid!.newTx()
+        .collectFrom([utxo])
+        .payToContract(
+          state.lockAddress,
+          { inline: Data.to(datum) },
+          { lovelace: BigInt(lovelace), [assetNameFull]: totalTokens }
+        )
+        .complete();
+
+      const txSigned = await tx.sign().complete();
+      const txHash = await txSigned.submit();
+
+      const success = await state.lucid!.awaitTx(txHash);
+
+      const url = new URL(BASE_URL);
+      url.searchParams.append("lockAddress", state.lockAddress!);
+      url.searchParams.append("txHash", utxo.txHash);
+      url.searchParams.append("outputIndex", utxo.outputIndex.toString());
+      url.searchParams.append("policyId", state.policyId);
+      url.searchParams.append("assetName", state.assetName);
+
+      setTimeout(() => {
+        mergeSpecs({ waitingLockTx: false, url: url.href });
+        if (success) {
+          mergeSpecs({ lockTxHash: txHash, utxoTxHash: utxo.txHash, utxoOutputIndex: utxo.outputIndex });
+        }
+      }, 3000);
+    } catch (err) {
+      mergeSpecs({
+        waitingLockTx: false,
+        error: `Failed to create airdrop: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    }
+  };
+
+  return (
+    <div className="h-fill flex flex-col items-center pt-24 pb-24">
+      <h2 className="text-gray-600 text-2xl font-bold">Create an Airdrop Contract</h2>
+      <p className="text-gray-500 mt-2">Enter token details and claimants to lock ADA and tokens. Use the Redeem page to claim, add rewards, or close.</p>
+
+      {!state.walletConnected && (
+        <div className="bg-slate-100 mt-6 max-w-2xl w-full p-12 rounded-md">
+          <p className="text-gray-600 mb-4">Connect a Cardano wallet to continue:</p>
+          {state.availableWallets.length > 0 ? (
+            state.availableWallets.map((wallet) => (
+              <Button
+                key={wallet}
+                className="mt-2 bg-blue-600 text-white"
+                type="button"
+                onClick={async () => {
+                  try {
+                    if (window.cardano[wallet]) {
+                      const lucid = await Lucid.new(
+                        new Blockfrost(ENV.BLOCKFROST_URL, ENV.BLOCKFROST_PROJECT_ID),
+                        ENV.NETWORK as Network
+                      );
+                      const walletApi = await window.cardano[wallet].enable();
+                      lucid.selectWallet(walletApi);
+                      const lockAddress = lucid.utils.validatorToAddress(validators.airdropSpend);
+                      mergeSpecs({ lucid, walletConnected: true, lockAddress });
+                    }
+                  } catch (e) {
+                    mergeSpecs({ error: `Failed to connect to ${wallet}: ${e instanceof Error ? e.message : String(e)}` });
+                  }
+                }}
+              >
+                Connect {wallet.charAt(0).toUpperCase() + wallet.slice(1)}
+              </Button>
+            ))
+          ) : (
+            <p className="text-red-500">No Cardano wallets detected. Please install Lace, Eternl, or Nami.</p>
+          )}
+        </div>
+      )}
+
+      {state.lucid && state.walletConnected && (
+        <div className="bg-slate-100 mt-6 max-w-2xl w-full p-12 rounded-md">
+          <form onSubmit={(e) => e.preventDefault()}>
+            <TextField
+              name="policyId"
+              label="Token Policy ID"
+              placeholder="Enter token policy ID (hex)"
+              value={state.policyId}
+              onInput={(e: React.ChangeEvent<HTMLInputElement>) => mergeSpecs({ policyId: e.currentTarget.value })}
+            />
+            <TextField
+              name="assetName"
+              label="Token Asset Name"
+              placeholder="Enter token asset name (e.g., MEME)"
+              value={state.assetName}
+              onInput={(e: React.ChangeEvent<HTMLInputElement>) => mergeSpecs({ assetName: e.currentTarget.value })}
+            />
+            <TextField
+              name="giftADA"
+              label="ADA Amount"
+              placeholder="Enter ADA amount to lock"
+              value={state.giftADA}
+              onInput={(e: React.ChangeEvent<HTMLInputElement>) => mergeSpecs({ giftADA: e.currentTarget.value })}
+            />
+            <TextField
+              name="claimants"
+              label="Claimants (address:amount, comma-separated)"
+              placeholder="e.g., addr_test1...:100,addr_test2...:200"
+              value={state.claimants}
+              onInput={(e: React.ChangeEvent<HTMLInputElement>) => mergeSpecs({ claimants: e.currentTarget.value })}
+            />
+            <Button
+              className="mt-4 bg-blue-600 text-white"
+              type="button"
+              onClick={createAirdrop}
+              disabled={state.waitingLockTx || !!state.lockTxHash || !state.policyId || !state.assetName || !state.giftADA || !state.claimants}
+            >
+              {state.waitingLockTx ? "Waiting for Tx..." : "Create Airdrop (Locks ADA and Tokens)"}
+            </Button>
+          </form>
+
+          {state.lockTxHash && (
+            <>
+              <h3 className="mt-4 mb-2 text-gray-400">ADA and Tokens Locked</h3>
+              <pre className="bg-slate-200 p-2 rounded overflow-x-scroll">{state.lockTxHash}</pre>
+            </>
+          )}
+
+          {state.url && (
+            <>
+              <h3 className="mt-4 mb-2 text-gray-400">Redeem with URL</h3>
+              <pre className="bg-slate-200 p-2 rounded overflow-x-scroll">{state.url}</pre>
+            </>
+          )}
+        </div>
+      )}
+
+      {state.error && (
+        <div className="bg-red-100 mt-4 p-4 rounded-md">
+          <p className="text-red-500">{state.error}</p>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default Create;

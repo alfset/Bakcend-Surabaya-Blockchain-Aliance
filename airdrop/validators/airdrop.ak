@@ -4,21 +4,21 @@ use cardano/address.{Address, Credential, Script, VerificationKey}
 use cardano/assets.{AssetName, PolicyId, flatten, lovelace_of, quantity_of}
 use cardano/transaction.{InlineDatum, Output, OutputReference, Transaction, find_input}
 
-// Datum untuk kontrak airdrop yang menyimpan info 
+// Datum for the airdrop contract storing relevant info
 pub type AirdropDatum {
-  creator: VerificationKeyHash,       
+  creator: VerificationKeyHash,
   policy_id: PolicyId,
   asset_name: AssetName,
-  amount: Int,                       
-  claimed: Int,                      
-  tag: Option<OutputReference>,        
-  claimants: List<(Address, Int)>,     
+  amount: Int,
+  claimed: Int,
+  tag: Option<OutputReference>,
+  claimants: List<(Address, Int)>,
 }
 
 pub type AirdropRedeemer {
-  Claim(VerificationKeyHash)          
-  Close                               
-  AddRewards                    
+  Claim(VerificationKeyHash)
+  Close
+  AddRewards
 }
 
 pub fn is_signed_by(
@@ -29,17 +29,13 @@ pub fn is_signed_by(
   list.has(extra_signatories, vk)
 }
 
-/// Validator utama kontrak airdrop token
+/// Main validator for the airdrop contract
 ///
-/// Memverifikasi tindakan berdasarkan redeemer
-/// - Claim: klaim token oleh penerima yang terdaftar
-/// - Close: creator menutup airdrop dan mengambil token sisa
-/// - AddRewards: creator menambahkan token hadiah ke kontrak
+/// Verifies actions based on the redeemer:
+/// - Claim: claim tokens by a registered claimant
+/// - Close: creator closes the airdrop and takes remaining tokens
+/// - AddRewards: creator adds reward tokens to the contract
 validator airdrop {
-  /// Logika untuk pengeluaran (spending) output yang membawa datum airdrop
-  ///
-  /// Memastikan validitas klaim token, penutupan airdrop, dan penambahan hadiah,
-  /// dengan memastikan signature yang tepat dan kondisi output yang sesuai.
   spend(
     datum: Option<AirdropDatum>,
     redeemer: AirdropRedeemer,
@@ -82,7 +78,7 @@ validator airdrop {
           addr.payment_credential == VerificationKey(claimer)
         })
 
-        // check nilai output lanjutan (minimal lovelace, jumlah token yang benar)
+        // Check continuing output value (minimum lovelace, correct token amount)
         let cont_has_correct_value = {
           let in_lovelace = lovelace_of(own_in.output.value)
           let remaining_tokens = amount - claimed
@@ -167,7 +163,7 @@ validator airdrop {
           let in_tokens = quantity_of(own_in.output.value, policy_id, asset_name)
           let out_tokens = quantity_of(cont_value, policy_id, asset_name)
           and {
-            out_tokens > in_tokens, 
+            out_tokens > in_tokens,
             lovelace_of(cont_value) >= lovelace_of(own_in.output.value),
             list.length(flatten(cont_value)) <= 3,
           }
@@ -184,7 +180,6 @@ validator airdrop {
       }
     }
   }
-
 
   mint(_redeemer: Data, _policy_id: PolicyId, _self: Transaction) {
     True

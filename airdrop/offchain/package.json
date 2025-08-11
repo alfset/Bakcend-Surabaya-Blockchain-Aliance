@@ -1,0 +1,22 @@
+{
+  "name": "offchain",
+  "type": "module",
+  "version": "1.0.0",
+  "scripts": {
+    "build": "tsc src/*.ts",
+    "prerun": "npx tsx src/consolidate-utxos.ts && npx tsx src/create-collateral.ts",
+    "create": "npx tsx src/create.ts",
+    "redeem": "npx tsx src/redeem.ts",
+    "claim": "npx tsx src/claim.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@meshsdk/core": "^1.9.0-beta.1",
+    "dotenv": "^17.2.1",
+    "lucid-cardano": "^0.10.11",
+    "tsx": "^4.9.4"
+  }
+}

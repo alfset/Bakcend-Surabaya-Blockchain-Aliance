@@ -1,7 +1,7 @@
 {
   "preamble": {
-    "title": "chi/airdrop",
-    "description": "Aiken contracts for project 'chi/airdrop'",
+    "title": "cardahohubindo/airdrop",
+    "description": "Aiken contracts for project 'cardahohubindo/airdrop'",
     "version": "0.0.0",
     "plutusVersion": "v3",
     "compiler": {
